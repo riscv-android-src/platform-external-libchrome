@@ -59,6 +59,11 @@ cc_defaults {
         "-Wno-unused-function",
         "-Wno-missing-field-initializers",
     ],
+
+    clang_cflags: [
+        // Temporarily suppress the warnings http://b/38232827
+        "-Wno-error=unused-lambda-capture",
+    ],
 }
 
 libchromeCommonSrc = [
@@ -182,6 +187,7 @@ libchromeCommonSrc = [
     "base/task_scheduler/sequence_sort_key.cc",
     "base/task_scheduler/task.cc",
     "base/task_scheduler/task_traits.cc",
+    "base/test/trace_event_analyzer.cc",
     "base/third_party/icu/icu_utf.cc",
     "base/third_party/nspr/prtime.cc",
     "base/threading/non_thread_safe_impl.cc",
@@ -243,7 +249,6 @@ libchromeCommonSrc = [
 ]
 
 libchromeLinuxSrc = [
-    "base/allocator/allocator_shim.cc",
     "base/files/file_path_watcher_linux.cc",
     "base/files/file_util_linux.cc",
     "base/memory/shared_memory_posix.cc",
@@ -291,6 +296,7 @@ libchromeMacSrc = [
 cc_library {
     name: "libchrome",
     host_supported: true,
+    vendor_available: true,
     defaults: ["libchrome-defaults"],
     srcs: libchromeCommonSrc,
 
@@ -305,9 +311,11 @@ cc_library {
         "libgtest_prod",
     ],
     target: {
+        linux: {
+            srcs: libchromeLinuxSrc,
+        },
         android: {
-            srcs: libchromeLinuxSrc + [
-                "base/allocator/allocator_shim_default_dispatch_to_linker_wrapped_symbols.cc",
+            srcs: [
                 "base/memory/shared_memory_android.cc",
                 "base/sys_info_chromeos.cc",
             ],
@@ -315,19 +323,12 @@ cc_library {
                 "liblog",
                 "libcutils",
             ],
-            ldflags: [
-                "-Wl,-wrap,calloc",
-                "-Wl,-wrap,free",
-                "-Wl,-wrap,malloc",
-                "-Wl,-wrap,memalign",
-                "-Wl,-wrap,realloc",
-            ],
         },
-        linux: {
-            srcs: libchromeLinuxSrc + [
+        linux_glibc: {
+            srcs: [
+                "base/allocator/allocator_shim.cc",
                 "base/allocator/allocator_shim_default_dispatch_to_glibc.cc"
             ],
-            host_ldlibs: ["-lrt"],
         },
         darwin: {
             srcs: libchromeMacSrc,
@@ -362,6 +363,7 @@ cc_library_static {
     name: "libchrome_test_helpers",
     defaults: ["libchrome-test-defaults"],
     shared_libs: ["libchrome"],
+    host_supported: true,
 
     srcs: [
         "base/test/simple_test_clock.cc",
@@ -371,7 +373,11 @@ cc_library_static {
         "base/test/test_switches.cc",
         "base/test/test_timeouts.cc",
     ],
-
+    target: {
+        darwin: {
+            enabled: false,
+        },
+    },
 }
 
 // Helpers needed for unit tests (for host).
@@ -563,9 +569,6 @@ cc_test {
                 "libchrome-crypto",
             ],
             cflags: ["-DDONT_EMBED_BUILD_METADATA"],
-        },
-        linux: {
-            host_ldlibs: ["-lrt"],
         },
         darwin: {
             enabled: false,
