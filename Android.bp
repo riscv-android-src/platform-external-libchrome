@@ -57,10 +57,6 @@ cc_defaults {
         "-Wno-missing-field-initializers",
         "-Wno-unused-parameter",
     ],
-    include_dirs: [
-        "external/valgrind/include",
-        "external/valgrind",
-    ],
 
     // Note: Although the generated header files are exported here, in building
     // libchrome, "." has priority (unlike building projects using libchrome),
@@ -191,8 +187,6 @@ libchromeCommonSrc = [
     "base/process/process_metrics.cc",
     "base/process/process_metrics_posix.cc",
     "base/process/process_posix.cc",
-    "base/profiler/scoped_profile.cc",
-    "base/profiler/scoped_tracker.cc",
     "base/profiler/tracked_time.cc",
     "base/rand_util.cc",
     "base/rand_util_posix.cc",
@@ -256,39 +250,6 @@ libchromeCommonSrc = [
     "base/time/time_posix.cc",
     "base/timer/elapsed_timer.cc",
     "base/timer/timer.cc",
-    "base/trace_event/category_registry.cc",
-    "base/trace_event/event_name_filter.cc",
-    "base/trace_event/heap_profiler_allocation_context.cc",
-    "base/trace_event/heap_profiler_allocation_context_tracker.cc",
-    "base/trace_event/heap_profiler_allocation_register.cc",
-    "base/trace_event/heap_profiler_allocation_register_posix.cc",
-    "base/trace_event/heap_profiler_event_filter.cc",
-    "base/trace_event/heap_profiler_heap_dump_writer.cc",
-    "base/trace_event/heap_profiler_stack_frame_deduplicator.cc",
-    "base/trace_event/heap_profiler_type_name_deduplicator.cc",
-    "base/trace_event/malloc_dump_provider.cc",
-    "base/trace_event/memory_allocator_dump.cc",
-    "base/trace_event/memory_allocator_dump_guid.cc",
-    "base/trace_event/memory_dump_manager.cc",
-    "base/trace_event/memory_dump_provider_info.cc",
-    "base/trace_event/memory_dump_request_args.cc",
-    "base/trace_event/memory_dump_scheduler.cc",
-    "base/trace_event/memory_dump_session_state.cc",
-    "base/trace_event/memory_infra_background_whitelist.cc",
-    "base/trace_event/memory_usage_estimator.cc",
-    "base/trace_event/process_memory_dump.cc",
-    "base/trace_event/process_memory_maps.cc",
-    "base/trace_event/process_memory_totals.cc",
-    "base/trace_event/trace_buffer.cc",
-    "base/trace_event/trace_config.cc",
-    "base/trace_event/trace_config_category_filter.cc",
-    "base/trace_event/trace_event_argument.cc",
-    "base/trace_event/trace_event_filter.cc",
-    "base/trace_event/trace_event_impl.cc",
-    "base/trace_event/trace_event_memory_overhead.cc",
-    "base/trace_event/trace_event_synthetic_delay.cc",
-    "base/trace_event/trace_log.cc",
-    "base/trace_event/trace_log_constants.cc",
     "base/tracked_objects.cc",
     "base/tracking_info.cc",
     "base/unguessable_token.cc",
@@ -318,7 +279,6 @@ libchromeLinuxSrc = [
     "base/files/file_path_watcher_linux.cc",
     "base/files/file_util_linux.cc",
     "base/memory/shared_memory_posix.cc",
-    "base/memory/shared_memory_tracker.cc",
     "base/posix/unix_domain_socket_linux.cc",
     "base/process/internal_linux.cc",
     "base/process/memory_linux.cc",
@@ -397,6 +357,7 @@ gensrcs {
 
 cc_library_shared {
     name: "libchrome-crypto",
+    vendor_available: true,
     defaults: ["libchrome-defaults"],
     srcs: [
         "crypto/openssl_util.cc",
@@ -482,7 +443,6 @@ cc_test {
         "base/files/scoped_temp_dir_unittest.cc",
         "base/gmock_unittest.cc",
         "base/guid_unittest.cc",
-        "base/id_map_unittest.cc",
         "base/json/json_parser_unittest.cc",
         "base/json/json_reader_unittest.cc",
         "base/json/json_value_converter_unittest.cc",
@@ -571,7 +531,6 @@ cc_test {
         "base/test/test_simple_task_runner.cc",
         "base/test/test_switches.cc",
         "base/test/test_timeouts.cc",
-        "base/test/trace_event_analyzer.cc",
         "base/threading/non_thread_safe_unittest.cc",
         "base/threading/platform_thread_unittest.cc",
         "base/threading/simple_thread_unittest.cc",
@@ -587,19 +546,6 @@ cc_test {
         "base/time/time_unittest.cc",
         "base/timer/hi_res_timer_manager_unittest.cc",
         "base/timer/timer_unittest.cc",
-        "base/trace_event/event_name_filter_unittest.cc",
-        "base/trace_event/heap_profiler_allocation_context_tracker_unittest.cc",
-        "base/trace_event/heap_profiler_stack_frame_deduplicator_unittest.cc",
-        "base/trace_event/heap_profiler_type_name_deduplicator_unittest.cc",
-        "base/trace_event/memory_allocator_dump_unittest.cc",
-        "base/trace_event/memory_dump_manager_unittest.cc",
-        "base/trace_event/memory_usage_estimator_unittest.cc",
-        "base/trace_event/process_memory_dump_unittest.cc",
-        "base/trace_event/trace_config_unittest.cc",
-        "base/trace_event/trace_event_argument_unittest.cc",
-        "base/trace_event/trace_event_filter_test_utils.cc",
-        "base/trace_event/trace_event_synthetic_delay_unittest.cc",
-        "base/trace_event/trace_event_unittest.cc",
         "base/tracked_objects_unittest.cc",
         "base/tuple_unittest.cc",
         "base/values_unittest.cc",
@@ -741,6 +687,38 @@ cc_prebuilt_binary {
     host_supported: true,
 }
 
+python_binary_host {
+    name: "mojom_generate_type_mappings",
+    main: "libchrome_tools/mojom_generate_type_mappings.py",
+    srcs: [
+        "build/gn_helpers.py",
+        "libchrome_tools/mojom_generate_type_mappings.py",
+        "mojo/public/tools/bindings/generate_type_mappings.py",
+    ],
+    defaults: ["libmojo_scripts"],
+}
+
+genrule {
+    name: "libmojo_common_custom_types__type_mappings",
+    cmd: "$(location mojom_generate_type_mappings)" +
+    "    --output=$(out)" +
+    "    $(in)",
+
+    tools: ["mojom_generate_type_mappings"],
+
+    srcs: [
+        "mojo/common/file.typemap",
+        "mojo/common/file_path.typemap",
+        "mojo/common/string16.typemap",
+        "mojo/common/text_direction.typemap",
+        "mojo/common/time.typemap",
+        "mojo/common/unguessable_token.typemap",
+        "mojo/common/values.typemap",
+        "mojo/common/version.typemap",
+    ],
+    out: ["common_custom_types__type_mappings"],
+}
+
 genrule {
     name: "libmojo_mojom_headers",
     cmd: "$(location mojom_source_generator_sh)" +
@@ -748,7 +726,7 @@ genrule {
     "    --package=external/libchrome" +
     "    --output_dir=$(genDir)" +
     "    --bytecode_path=$(genDir)" +
-    "    --typemap=$(location gen/mojo/common/common_custom_types__type_mappings)" +
+    "    --typemap=$(location common_custom_types__type_mappings)" +
     "    --generators=c++" +
     "    --use_new_wrapper_types" +
     "    $(in)",
@@ -758,11 +736,7 @@ genrule {
         "mojom_source_generator_sh",
     ],
 
-    tool_files: [
-        // This file was copied from out/Release in a Chrome checkout.
-        // TODO(lhchavez): Generate this file instead of hardcoding it.
-        "gen/mojo/common/common_custom_types__type_mappings",
-    ],
+    tool_files: [":libmojo_common_custom_types__type_mappings"],
 
     srcs: [":libmojo_mojom_files"],
 
@@ -816,7 +790,7 @@ genrule {
     "    --package=external/libchrome" +
     "    --output_dir=$(genDir)" +
     "    --bytecode_path=$(genDir)" +
-    "    --typemap=$(location gen/mojo/common/common_custom_types__type_mappings)" +
+    "    --typemap=$(location common_custom_types__type_mappings)" +
     "    --generators=c++" +
     "    --use_new_wrapper_types" +
     "    $(in)",
@@ -826,12 +800,7 @@ genrule {
         "mojom_source_generator_sh",
     ],
 
-    tool_files: [
-        // This file was copied from out/Release in a Chrome checkout.
-        // TODO(lhchavez): Generate this file instead of hardcoding it.
-        "gen/mojo/common/common_custom_types__type_mappings",
-        "libchrome_tools/mojom_source_generator.sh",
-    ],
+    tool_files: [":libmojo_common_custom_types__type_mappings"],
 
     srcs: [":libmojo_mojom_files"],
 
@@ -900,6 +869,7 @@ genrule {
 
 cc_library_shared {
     name: "libmojo",
+    vendor_available: true,
 
     generated_headers: [
         "libmojo_jni_headers",
@@ -957,6 +927,8 @@ cc_library_shared {
         "libchrome-crypto",
     ],
 
+    header_libs: ["jni_headers"],
+
     export_include_dirs: ["."],
 }
 
@@ -967,9 +939,10 @@ genrule {
     "    --package=external/libchrome" +
     "    --output_dir=$(genDir)" +
     "    --bytecode_path=$(genDir)" +
-    "    --typemap=$(location gen/mojo/common/common_custom_types__type_mappings)" +
+    "    --typemap=$(location common_custom_types__type_mappings)" +
     "    --generators=java" +
     "    --use_new_wrapper_types" +
+    "    --srcjar=$(out)" +
     "    $(in)",
 
     tools: [
@@ -977,60 +950,11 @@ genrule {
         "mojom_source_generator_sh",
     ],
 
-    tool_files: [
-        // This file was copied from out/Release in a Chrome checkout.
-        // TODO(lhchavez): Generate this file instead of hardcoding it.
-        "gen/mojo/common/common_custom_types__type_mappings",
-    ],
+    tool_files: [":libmojo_common_custom_types__type_mappings"],
 
     srcs: [":libmojo_mojom_files"],
 
-    out: [
-        "src/org/chromium/gfx/mojom/InsetsF.java",
-        "src/org/chromium/gfx/mojom/Insets.java",
-        "src/org/chromium/gfx/mojom/PointF.java",
-        "src/org/chromium/gfx/mojom/Point.java",
-        "src/org/chromium/gfx/mojom/RangeF.java",
-        "src/org/chromium/gfx/mojom/Range.java",
-        "src/org/chromium/gfx/mojom/RectF.java",
-        "src/org/chromium/gfx/mojom/Rect.java",
-        "src/org/chromium/gfx/mojom/SizeF.java",
-        "src/org/chromium/gfx/mojom/Size.java",
-        "src/org/chromium/gfx/mojom/Vector2dF.java",
-        "src/org/chromium/gfx/mojom/Vector2d.java",
-        "src/org/chromium/IPC/mojom/ChannelBootstrap_Internal.java",
-        "src/org/chromium/IPC/mojom/ChannelBootstrap.java",
-        "src/org/chromium/IPC/mojom/Channel_Internal.java",
-        "src/org/chromium/IPC/mojom/Channel.java",
-        "src/org/chromium/IPC/mojom/GenericInterface_Internal.java",
-        "src/org/chromium/IPC/mojom/GenericInterface.java",
-        "src/org/chromium/IPC/mojom/IpcConstants.java",
-        "src/org/chromium/IPC/mojom/SerializedHandle.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/FlushForTesting.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/InterfaceControlMessagesConstants.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/QueryVersion.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/QueryVersionResult.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/RequireVersion.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/RunInput.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/RunMessageParams.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/RunOrClosePipeInput.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/RunOrClosePipeMessageParams.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/RunOutput.java",
-        "src/org/chromium/mojo/bindings/interfacecontrol/RunResponseMessageParams.java",
-        "src/org/chromium/mojo/bindings/pipecontrol/DisconnectReason.java",
-        "src/org/chromium/mojo/bindings/pipecontrol/PeerAssociatedEndpointClosedEvent.java",
-        "src/org/chromium/mojo/bindings/pipecontrol/PipeControlMessagesConstants.java",
-        "src/org/chromium/mojo/bindings/pipecontrol/RunOrClosePipeInput.java",
-        "src/org/chromium/mojo/bindings/pipecontrol/RunOrClosePipeMessageParams.java",
-        "src/org/chromium/mojo/common/mojom/File.java",
-        "src/org/chromium/mojo/common/mojom/String16.java",
-        "src/org/chromium/mojo/common/mojom/TextDirection.java",
-        "src/org/chromium/mojo/common/mojom/TimeDelta.java",
-        "src/org/chromium/mojo/common/mojom/Time.java",
-        "src/org/chromium/mojo/common/mojom/TimeTicks.java",
-        "src/org/chromium/mojo/common/mojom/UnguessableToken.java",
-        "src/org/chromium/mojo/common/mojom/Version.java",
-    ],
+    out: ["libmojo_mojom.srcjar"],
 }
 
 java_library {
