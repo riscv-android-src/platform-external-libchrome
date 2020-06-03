@@ -39,3 +39,6 @@ absl-thread-annotation-conflict.patch
 
 # Forward compatibility patch to r78xxxx
 forward-compatibility-dbus.patch
+
+# Remove after uprev to r780000
+py3.patch
