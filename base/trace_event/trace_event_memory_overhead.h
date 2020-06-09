@@ -22,6 +22,42 @@ namespace trace_event {
 
 class ProcessMemoryDump;
 
+// libchrome has trace disabled. TraceEventMemoryOverhead is a stub
+// implementation for real TraceEventMemoryOverhead below.
+#if 1
+
+class TraceEventMemoryOverhead {
+ public:
+  enum ObjectType : uint32_t {
+    kOther = 0,
+    kTraceBuffer,
+    kTraceBufferChunk,
+    kTraceEvent,
+    kUnusedTraceEvent,
+    kTracedValue,
+    kConvertableToTraceFormat,
+    kHeapProfilerAllocationRegister,
+    kHeapProfilerTypeNameDeduplicator,
+    kHeapProfilerStackFrameDeduplicator,
+    kStdString,
+    kBaseValue,
+    kTraceEventMemoryOverhead,
+    kFrameMetrics,
+    kLast
+  };
+
+  TraceEventMemoryOverhead() = default;
+  ~TraceEventMemoryOverhead() = default;
+
+  void Add(ObjectType, size_t) {};
+  void Add(ObjectType, size_t, size_t) {};
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TraceEventMemoryOverhead);
+};
+
+#else
+
 // Used to estimate the memory overhead of the tracing infrastructure.
 class BASE_EXPORT TraceEventMemoryOverhead {
  public:
@@ -88,6 +124,8 @@ class BASE_EXPORT TraceEventMemoryOverhead {
 
   DISALLOW_COPY_AND_ASSIGN(TraceEventMemoryOverhead);
 };
+
+#endif
 
 }  // namespace trace_event
 }  // namespace base

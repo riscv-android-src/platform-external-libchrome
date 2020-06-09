@@ -213,18 +213,6 @@ void Core::ConnectIsolated(ConnectionParams connection_params,
                                        connection_name);
 }
 
-void Core::SetMachPortProvider(base::PortProvider* port_provider) {
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  GetNodeController()->CreateMachPortRelay(port_provider);
-#endif
-}
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-MachPortRelay* Core::GetMachPortRelay() {
-  return GetNodeController()->GetMachPortRelay();
-}
-#endif
-
 MojoHandle Core::AddDispatcher(scoped_refptr<Dispatcher> dispatcher) {
   base::AutoLock lock(handles_->GetLock());
   return handles_->AddDispatcher(dispatcher);
@@ -1017,7 +1005,8 @@ MojoResult Core::UnwrapPlatformHandle(
   {
     base::AutoLock lock(handles_->GetLock());
     dispatcher = handles_->GetDispatcher(mojo_handle);
-    if (dispatcher->GetType() != Dispatcher::Type::PLATFORM_HANDLE)
+    if (!dispatcher ||
+        dispatcher->GetType() != Dispatcher::Type::PLATFORM_HANDLE)
       return MOJO_RESULT_INVALID_ARGUMENT;
 
     MojoResult result =

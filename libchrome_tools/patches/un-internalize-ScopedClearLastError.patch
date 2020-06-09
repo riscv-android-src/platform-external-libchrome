@@ -1,0 +1,14 @@
+diff --git a/base/scoped_clear_last_error.h b/base/scoped_clear_last_error.h
+index b19f0436ae67..a28d5f62669a 100644
+--- a/base/scoped_clear_last_error.h
++++ b/base/scoped_clear_last_error.h
+@@ -53,6 +53,9 @@ using ScopedClearLastError = ScopedClearLastErrorBase;
+ #endif  // defined(OS_WIN)
+ 
+ }  // namespace internal
++
++using ScopedClearLastError = internal::ScopedClearLastError;
++
+ }  // namespace base
+ 
+ #endif  // BASE_SCOPED_CLEAR_LAST_ERROR_H_

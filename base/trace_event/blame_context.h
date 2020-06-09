@@ -19,6 +19,26 @@ class TracedValue;
 
 namespace trace_event {
 
+// libchrome has trace disabled. BlameContext is a stub implementation for real
+// BlameContext below.
+#if 1
+
+class BlameContext
+    : public trace_event::TraceLog::AsyncEnabledStateObserver {
+ public:
+  BlameContext(const char *, const char *, const char *, const char *,
+               int64_t id, const BlameContext *) {}
+  ~BlameContext() override = default;
+
+  void Enter() {}
+  void Leave() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BlameContext);
+};
+
+#else
+
 // A blame context represents a logical unit to which we want to attribute
 // different costs (e.g., CPU, network, or memory usage). An example of a blame
 // context is an <iframe> element on a web page. Different subsystems can
@@ -127,10 +147,12 @@ class BASE_EXPORT BlameContext
   const unsigned char* category_group_enabled_;
 
   ThreadChecker thread_checker_;
-  WeakPtrFactory<BlameContext> weak_factory_;
+  WeakPtrFactory<BlameContext> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(BlameContext);
 };
+
+#endif
 
 }  // namespace trace_event
 }  // namespace base

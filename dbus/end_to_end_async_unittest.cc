@@ -11,11 +11,10 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -55,7 +54,7 @@ class EndToEndAsyncTest : public testing::Test {
     options.dbus_task_runner = dbus_thread_->task_runner();
     test_service_.reset(new TestService(options));
     ASSERT_TRUE(test_service_->StartService());
-    ASSERT_TRUE(test_service_->WaitUntilServiceIsStarted());
+    test_service_->WaitUntilServiceIsStarted();
     ASSERT_TRUE(test_service_->HasDBusThread());
 
     // Create the client, using the D-Bus thread.
@@ -195,7 +194,7 @@ class EndToEndAsyncTest : public testing::Test {
       response_strings_.push_back(std::string());
     }
     run_loop_->Quit();
-  };
+  }
 
   // Wait for the given number of errors.
   void WaitForErrors(size_t num_errors) {
@@ -256,7 +255,7 @@ class EndToEndAsyncTest : public testing::Test {
     run_loop_->Run();
   }
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<base::RunLoop> run_loop_;
   std::vector<std::string> response_strings_;
   std::vector<std::string> error_names_;
@@ -310,7 +309,7 @@ TEST_F(EndToEndAsyncTest, EchoWithErrorCallback) {
 TEST_F(EndToEndAsyncTest, EchoThreeTimes) {
   const char* kMessages[] = { "foo", "bar", "baz" };
 
-  for (size_t i = 0; i < arraysize(kMessages); ++i) {
+  for (size_t i = 0; i < base::size(kMessages); ++i) {
     // Create the method call.
     MethodCall method_call("org.chromium.TestInterface", "Echo");
     MessageWriter writer(&method_call);
@@ -443,7 +442,7 @@ TEST_F(EndToEndAsyncTest, CancelPendingCalls) {
 
   // We shouldn't receive any responses. Wait for a while just to make sure.
   run_loop_.reset(new base::RunLoop);
-  message_loop_.task_runner()->PostDelayedTask(
+  scoped_task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
       FROM_HERE, run_loop_->QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop_->Run();
   EXPECT_TRUE(response_strings_.empty());
@@ -543,9 +542,9 @@ TEST_F(EndToEndAsyncTest, EmptyResponseCallback) {
   // Call the method with an empty callback.
   const int timeout_ms = ObjectProxy::TIMEOUT_USE_DEFAULT;
   object_proxy_->CallMethod(&method_call, timeout_ms, base::DoNothing());
-  // Post a delayed task to quit the message loop.
+  // Post a delayed task to quit the RunLoop.
   run_loop_.reset(new base::RunLoop);
-  message_loop_.task_runner()->PostDelayedTask(
+  scoped_task_environment_.GetMainThreadTaskRunner()->PostDelayedTask(
       FROM_HERE, run_loop_->QuitClosure(), TestTimeouts::tiny_timeout());
   run_loop_->Run();
   // We cannot tell if the empty callback is called, but at least we can

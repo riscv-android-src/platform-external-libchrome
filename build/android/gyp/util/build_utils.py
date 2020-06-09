@@ -22,8 +22,7 @@ import zipfile
 # Any new non-system import must be added to:
 #     //build/config/android/internal_rules.gni
 
-# Some clients do not add //build/android/gyp to PYTHONPATH.
-import md5_check  # pylint: disable=relative-import
+from util import md5_check
 
 # pylib conflicts with mojo/public/tools/bindings/pylib. Prioritize
 # build/android/pylib.
@@ -43,8 +42,10 @@ DIR_SOURCE_ROOT = os.environ.get('CHECKOUT_SOURCE_ROOT',
     os.path.abspath(os.path.join(os.path.dirname(__file__),
                                  os.pardir, os.pardir, os.pardir, os.pardir)))
 
-HERMETIC_TIMESTAMP = (2001, 1, 1, 0, 0, 0)
-_HERMETIC_FILE_ATTR = (0644 << 16L)
+try:
+  string_types = basestring
+except NameError:
+  string_types = (str, bytes)
 
 
 @contextlib.contextmanager
@@ -91,24 +92,33 @@ def ReadBuildVars(path):
     return dict(l.rstrip().split('=', 1) for l in f)
 
 
-def ParseGnList(gn_string):
-  """Converts a command-line parameter into a list.
+def ParseGnList(value):
+  """Converts a "GN-list" command-line parameter into a list.
 
-  If the input starts with a '[' it is assumed to be a GN-formatted list and
-  it will be parsed accordingly. When empty an empty list will be returned.
-  Otherwise, the parameter will be treated as a single raw string (not
-  GN-formatted in that it's not assumed to have literal quotes that must be
-  removed) and a list will be returned containing that string.
+  Conversions handled:
+    * None -> []
+    * '' -> []
+    * 'asdf' -> ['asdf']
+    * '["a", "b"]' -> ['a', 'b']
+    * ['["a", "b"]', 'c'] -> ['a', 'b', 'c']  (flattened list)
 
   The common use for this behavior is in the Android build where things can
   take lists of @FileArg references that are expanded via ExpandFileArgs.
   """
-  if gn_string.startswith('['):
-    parser = gn_helpers.GNValueParser(gn_string)
-    return parser.ParseList()
-  if len(gn_string):
-    return [ gn_string ]
-  return []
+  # Convert None to [].
+  if not value:
+    return []
+  # Convert a list of GN lists to a flattened list.
+  if isinstance(value, list):
+    ret = []
+    for arg in value:
+      ret.extend(ParseGnList(arg))
+    return ret
+  # Convert normal GN list.
+  if value.startswith('['):
+    return gn_helpers.GNValueParser(value).ParseList()
+  # Convert a single string value to a list.
+  return [value]
 
 
 def CheckOptions(options, parser, required=None):
@@ -133,13 +143,14 @@ def WriteJson(obj, path, only_if_changed=False):
 
 
 @contextlib.contextmanager
-def AtomicOutput(path, only_if_changed=True):
+def AtomicOutput(path, only_if_changed=True, mode='w+b'):
   """Helper to prevent half-written outputs.
 
   Args:
     path: Path to the final output file, which will be written atomically.
     only_if_changed: If True (the default), do not touch the filesystem
       if the content has not changed.
+    mode: The mode to open the file in (str).
   Returns:
     A python context manager that yelds a NamedTemporaryFile instance
     that must be used by clients to write the data to. On exit, the
@@ -151,9 +162,11 @@ def AtomicOutput(path, only_if_changed=True):
       subprocess.check_call(['prog', '--output', tmp_file.name])
   """
   # Create in same directory to ensure same filesystem when moving.
-  with tempfile.NamedTemporaryFile(suffix=os.path.basename(path),
-                                   dir=os.path.dirname(path),
-                                   delete=False) as f:
+  dirname = os.path.dirname(path)
+  if not os.path.exists(dirname):
+    MakeDirectory(dirname)
+  with tempfile.NamedTemporaryFile(
+      mode, suffix=os.path.basename(path), dir=dirname, delete=False) as f:
     try:
       yield f
 
@@ -183,6 +196,22 @@ class CalledProcessError(Exception):
     copyable_command = '( cd {}; {} )'.format(os.path.abspath(self.cwd),
         ' '.join(map(pipes.quote, self.args)))
     return 'Command failed: {}\n{}'.format(copyable_command, self.output)
+
+
+def FilterLines(output, filter_string):
+  """Output filter from build_utils.CheckOutput.
+
+  Args:
+    output: Executable output as from build_utils.CheckOutput.
+    filter_string: An RE string that will filter (remove) matching
+        lines from |output|.
+
+  Returns:
+    The filtered output, as a single string.
+  """
+  re_filter = re.compile(filter_string)
+  return '\n'.join(
+      line for line in output.splitlines() if not re_filter.search(line))
 
 
 # This can be used in most cases like subprocess.check_output(). The output,
@@ -246,7 +275,7 @@ def _IsSymlink(zip_file, name):
 
   # The two high-order bytes of ZipInfo.external_attr represent
   # UNIX permissions and file type bits.
-  return stat.S_ISLNK(zi.external_attr >> 16L)
+  return stat.S_ISLNK(zi.external_attr >> 16)
 
 
 def ExtractAll(zip_path, path=None, no_clobber=True, pattern=None,
@@ -289,13 +318,24 @@ def ExtractAll(zip_path, path=None, no_clobber=True, pattern=None,
   return extracted
 
 
-def AddToZipHermetic(zip_file, zip_path, src_path=None, data=None,
+def HermeticZipInfo(*args, **kwargs):
+  """Creates a ZipInfo with a constant timestamp and external_attr."""
+  ret = zipfile.ZipInfo(*args, **kwargs)
+  ret.date_time = (2001, 1, 1, 0, 0, 0)
+  ret.external_attr = (0o644 << 16)
+  return ret
+
+
+def AddToZipHermetic(zip_file,
+                     zip_path,
+                     src_path=None,
+                     data=None,
                      compress=None):
   """Adds a file to the given ZipFile with a hard-coded modified time.
 
   Args:
     zip_file: ZipFile instance to add the file to.
-    zip_path: Destination path within the zip file.
+    zip_path: Destination path within the zip file (or ZipInfo instance).
     src_path: Path of the source file. Mutually exclusive with |data|.
     data: File data as a string.
     compress: Whether to enable compression. Default is taken from ZipFile
@@ -303,18 +343,32 @@ def AddToZipHermetic(zip_file, zip_path, src_path=None, data=None,
   """
   assert (src_path is None) != (data is None), (
       '|src_path| and |data| are mutually exclusive.')
+  if isinstance(zip_path, zipfile.ZipInfo):
+    zipinfo = zip_path
+    zip_path = zipinfo.filename
+  else:
+    zipinfo = HermeticZipInfo(filename=zip_path)
+
   _CheckZipPath(zip_path)
-  zipinfo = zipfile.ZipInfo(filename=zip_path, date_time=HERMETIC_TIMESTAMP)
-  zipinfo.external_attr = _HERMETIC_FILE_ATTR
 
   if src_path and os.path.islink(src_path):
     zipinfo.filename = zip_path
-    zipinfo.external_attr |= stat.S_IFLNK << 16L # mark as a symlink
+    zipinfo.external_attr |= stat.S_IFLNK << 16  # mark as a symlink
     zip_file.writestr(zipinfo, os.readlink(src_path))
     return
 
+  # zipfile.write() does
+  #     external_attr = (os.stat(src_path)[0] & 0xFFFF) << 16
+  # but we want to use _HERMETIC_FILE_ATTR, so manually set
+  # the few attr bits we care about.
   if src_path:
-    with file(src_path) as f:
+    st = os.stat(src_path)
+    for mode in (stat.S_IXUSR, stat.S_IXGRP, stat.S_IXOTH):
+      if st.st_mode & mode:
+        zipinfo.external_attr |= mode << 16
+
+  if src_path:
+    with open(src_path, 'rb') as f:
       data = f.read()
 
   # zipfile will deflate even when it makes the file bigger. To avoid
@@ -330,31 +384,45 @@ def AddToZipHermetic(zip_file, zip_path, src_path=None, data=None,
   zip_file.writestr(zipinfo, data, compress_type)
 
 
-def DoZip(inputs, output, base_dir=None, compress_fn=None):
+def DoZip(inputs, output, base_dir=None, compress_fn=None,
+          zip_prefix_path=None):
   """Creates a zip file from a list of files.
 
   Args:
     inputs: A list of paths to zip, or a list of (zip_path, fs_path) tuples.
-    output: Destination .zip file.
+    output: Path, fileobj, or ZipFile instance to add files to.
     base_dir: Prefix to strip from inputs.
     compress_fn: Applied to each input to determine whether or not to compress.
         By default, items will be |zipfile.ZIP_STORED|.
+    zip_prefix_path: Path prepended to file path in zip file.
   """
+  if base_dir is None:
+    base_dir = '.'
   input_tuples = []
   for tup in inputs:
-    if isinstance(tup, basestring):
+    if isinstance(tup, string_types):
       tup = (os.path.relpath(tup, base_dir), tup)
     input_tuples.append(tup)
 
   # Sort by zip path to ensure stable zip ordering.
   input_tuples.sort(key=lambda tup: tup[0])
-  with zipfile.ZipFile(output, 'w') as outfile:
+
+  out_zip = output
+  if not isinstance(output, zipfile.ZipFile):
+    out_zip = zipfile.ZipFile(output, 'w')
+
+  try:
     for zip_path, fs_path in input_tuples:
+      if zip_prefix_path:
+        zip_path = os.path.join(zip_prefix_path, zip_path)
       compress = compress_fn(zip_path) if compress_fn else None
-      AddToZipHermetic(outfile, zip_path, src_path=fs_path, compress=compress)
+      AddToZipHermetic(out_zip, zip_path, src_path=fs_path, compress=compress)
+  finally:
+    if output is not out_zip:
+      out_zip.close()
 
 
-def ZipDir(output, base_dir, compress_fn=None):
+def ZipDir(output, base_dir, compress_fn=None, zip_prefix_path=None):
   """Creates a zip file from a directory."""
   inputs = []
   for root, _, files in os.walk(base_dir):
@@ -362,7 +430,8 @@ def ZipDir(output, base_dir, compress_fn=None):
       inputs.append(os.path.join(root, f))
 
   with AtomicOutput(output) as f:
-    DoZip(inputs, f, base_dir, compress_fn=compress_fn)
+    DoZip(inputs, f, base_dir, compress_fn=compress_fn,
+          zip_prefix_path=zip_prefix_path)
 
 
 def MatchesGlob(path, filters):
@@ -370,23 +439,21 @@ def MatchesGlob(path, filters):
   return filters and any(fnmatch.fnmatch(path, f) for f in filters)
 
 
-def MergeZips(output, input_zips, path_transform=None):
+def MergeZips(output, input_zips, path_transform=None, compress=None):
   """Combines all files from |input_zips| into |output|.
 
   Args:
-    output: Path or ZipFile instance to add files to.
+    output: Path, fileobj, or ZipFile instance to add files to.
     input_zips: Iterable of paths to zip files to merge.
     path_transform: Called for each entry path. Returns a new path, or None to
         skip the file.
+    compress: Overrides compression setting from origin zip entries.
   """
   path_transform = path_transform or (lambda p: p)
   added_names = set()
 
-  output_is_already_open = not isinstance(output, basestring)
-  if output_is_already_open:
-    assert isinstance(output, zipfile.ZipFile)
-    out_zip = output
-  else:
+  out_zip = output
+  if not isinstance(output, zipfile.ZipFile):
     out_zip = zipfile.ZipFile(output, 'w')
 
   try:
@@ -403,11 +470,18 @@ def MergeZips(output, input_zips, path_transform=None):
             continue
           already_added = dst_name in added_names
           if not already_added:
-            AddToZipHermetic(out_zip, dst_name, data=in_zip.read(info),
-                             compress=info.compress_type != zipfile.ZIP_STORED)
+            if compress is not None:
+              compress_entry = compress
+            else:
+              compress_entry = info.compress_type != zipfile.ZIP_STORED
+            AddToZipHermetic(
+                out_zip,
+                dst_name,
+                data=in_zip.read(info),
+                compress=compress_entry)
             added_names.add(dst_name)
   finally:
-    if not output_is_already_open:
+    if output is not out_zip:
       out_zip.close()
 
 
@@ -435,7 +509,7 @@ def GetSortedTransitiveDependencies(top, deps_func):
       deps_map[node] = deps
 
   discover(top)
-  return deps_map.keys()
+  return list(deps_map)
 
 
 def _ComputePythonDependencies():
@@ -491,6 +565,7 @@ def AddDepfileOption(parser):
 
 def WriteDepfile(depfile_path, first_gn_output, inputs=None, add_pydeps=True):
   assert depfile_path != first_gn_output  # http://crbug.com/646165
+  assert not isinstance(inputs, string_types)  # Easy mistake to make
   inputs = inputs or []
   if add_pydeps:
     inputs = _ComputePythonDependencies() + inputs
@@ -525,9 +600,6 @@ def ExpandFileArgs(args):
     if not match:
       continue
 
-    if match.end() != len(arg):
-      raise Exception('Unexpected characters after FileArg: ' + arg)
-
     lookup_path = match.group(1).split(':')
     file_path = lookup_path[0]
     if not file_path in file_jsons:
@@ -538,12 +610,13 @@ def ExpandFileArgs(args):
     for k in lookup_path[1:]:
       expansion = expansion[k]
 
-    # This should match ParseGNList. The output is either a GN-formatted list
+    # This should match ParseGnList. The output is either a GN-formatted list
     # or a literal (with no quotes).
     if isinstance(expansion, list):
-      new_args[i] = arg[:match.start()] + gn_helpers.ToGNString(expansion)
+      new_args[i] = (arg[:match.start()] + gn_helpers.ToGNString(expansion) +
+                     arg[match.end():])
     else:
-      new_args[i] = arg[:match.start()] + str(expansion)
+      new_args[i] = arg[:match.start()] + str(expansion) + arg[match.end():]
 
   return new_args
 

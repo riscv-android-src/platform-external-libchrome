@@ -33,11 +33,11 @@ enum class MessageType : uint32_t {
   REQUEST_PORT_MERGE,
   REQUEST_INTRODUCTION,
   INTRODUCE,
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
   RELAY_EVENT_MESSAGE,
 #endif
   BROADCAST_EVENT,
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
   EVENT_MESSAGE_FROM_RELAY,
 #endif
   ACCEPT_PEER,
@@ -110,7 +110,7 @@ struct IntroductionData {
   ports::NodeName name;
 };
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
 // This struct is followed by the full payload of a message to be relayed.
 struct RelayEventMessageData {
   ports::NodeName destination;
@@ -160,13 +160,15 @@ bool GetMessagePayload(const void* bytes,
 scoped_refptr<NodeChannel> NodeChannel::Create(
     Delegate* delegate,
     ConnectionParams connection_params,
+    Channel::HandlePolicy channel_handle_policy,
     scoped_refptr<base::TaskRunner> io_task_runner,
     const ProcessErrorCallback& process_error_callback) {
 #if defined(OS_NACL_SFI)
   LOG(FATAL) << "Multi-process not yet supported on NaCl-SFI";
   return nullptr;
 #else
-  return new NodeChannel(delegate, std::move(connection_params), io_task_runner,
+  return new NodeChannel(delegate, std::move(connection_params),
+                         channel_handle_policy, io_task_runner,
                          process_error_callback);
 #endif
 }
@@ -371,7 +373,7 @@ void NodeChannel::Broadcast(Channel::MessagePtr message) {
   WriteChannelMessage(std::move(broadcast_message));
 }
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
 void NodeChannel::RelayEventMessage(const ports::NodeName& destination,
                                     Channel::MessagePtr message) {
 #if defined(OS_WIN)
@@ -435,10 +437,11 @@ void NodeChannel::EventMessageFromRelay(const ports::NodeName& source,
   relayed_message->SetHandles(message->TakeHandles());
   WriteChannelMessage(std::move(relayed_message));
 }
-#endif  // defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#endif  // defined(OS_WIN)
 
 NodeChannel::NodeChannel(Delegate* delegate,
                          ConnectionParams connection_params,
+                         Channel::HandlePolicy channel_handle_policy,
                          scoped_refptr<base::TaskRunner> io_task_runner,
                          const ProcessErrorCallback& process_error_callback)
     : delegate_(delegate),
@@ -446,8 +449,10 @@ NodeChannel::NodeChannel(Delegate* delegate,
       process_error_callback_(process_error_callback)
 #if !defined(OS_NACL_SFI)
       ,
-      channel_(
-          Channel::Create(this, std::move(connection_params), io_task_runner_))
+      channel_(Channel::Create(this,
+                               std::move(connection_params),
+                               channel_handle_policy,
+                               io_task_runner_))
 #endif
 {
 }
@@ -601,7 +606,7 @@ void NodeChannel::OnChannelMessage(const void* payload,
       break;
     }
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
     case MessageType::RELAY_EVENT_MESSAGE: {
       base::ProcessHandle from_process;
       {
@@ -625,9 +630,6 @@ void NodeChannel::OnChannelMessage(const void* payload,
           DLOG(ERROR) << "Dropping invalid relay message.";
           break;
         }
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-        message->SetHandles(std::move(handles));
-#endif
         delegate_->OnRelayEventMessage(remote_node_name_, from_process,
                                        data->destination, std::move(message));
         return;
@@ -651,7 +653,7 @@ void NodeChannel::OnChannelMessage(const void* payload,
       return;
     }
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
     case MessageType::EVENT_MESSAGE_FROM_RELAY:
       const EventMessageFromRelayData* data;
       if (GetMessagePayload(payload, payload_size, &data)) {
@@ -671,7 +673,7 @@ void NodeChannel::OnChannelMessage(const void* payload,
       }
       break;
 
-#endif  // defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#endif  // defined(OS_WIN)
 
     case MessageType::ACCEPT_PEER: {
       const AcceptPeerData* data;
@@ -707,7 +709,7 @@ void NodeChannel::OnChannelError(Channel::Error error) {
   }
 
   // |OnChannelError()| may cause |this| to be destroyed, but still need access
-  // to the name name after that destruction. So may a copy of
+  // to the name after that destruction. So make a copy of
   // |remote_node_name_| so it can be used if |this| becomes destroyed.
   ports::NodeName node_name = remote_node_name_;
   delegate_->OnChannelError(node_name, this);
@@ -718,7 +720,7 @@ void NodeChannel::WriteChannelMessage(Channel::MessagePtr message) {
   // maximum allowed size. This is more useful than killing a Channel when we
   // *receive* an oversized message, as we should consider oversized message
   // transmission to be a bug and this helps easily identify offending code.
-  CHECK(message->data_num_bytes() < GetConfiguration().max_message_num_bytes);
+  CHECK_LT(message->data_num_bytes(), GetConfiguration().max_message_num_bytes);
 
   base::AutoLock lock(channel_lock_);
   if (!channel_)

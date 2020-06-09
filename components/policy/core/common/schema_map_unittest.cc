@@ -13,6 +13,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/core/common/schema.h"
+#include "components/strings/grit/components_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace policy {
@@ -20,27 +21,26 @@ namespace policy {
 namespace {
 
 const char kTestSchema[] =
-    "{"
-    "  \"type\": \"object\","
-    "  \"properties\": {"
-    "    \"string\": { \"type\": \"string\" },"
-    "    \"integer\": { \"type\": \"integer\" },"
-    "    \"boolean\": { \"type\": \"boolean\" },"
-    "    \"null\": { \"type\": \"null\" },"
-    "    \"double\": { \"type\": \"number\" },"
-    "    \"list\": {"
-    "      \"type\": \"array\","
-    "      \"items\": { \"type\": \"string\" }"
-    "    },"
-    "    \"object\": {"
-    "      \"type\": \"object\","
-    "      \"properties\": {"
-    "        \"a\": { \"type\": \"string\" },"
-    "        \"b\": { \"type\": \"integer\" }"
-    "      }"
-    "    }"
-    "  }"
-    "}";
+    R"({
+      "type": "object",
+      "properties": {
+        "string": { "type": "string" },
+        "integer": { "type": "integer" },
+        "boolean": { "type": "boolean" },
+        "double": { "type": "number" },
+        "list": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "object": {
+          "type": "object",
+          "properties": {
+            "a": { "type": "string" },
+            "b": { "type": "integer" }
+          }
+        }
+      }
+    })";
 
 }  // namespace
 
@@ -165,8 +165,6 @@ TEST_F(SchemaMapTest, FilterBundle) {
           POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(true), nullptr);
   map.Set("integer", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
           POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(1), nullptr);
-  map.Set("null", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-          POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(), nullptr);
   map.Set("double", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
           POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(1.2), nullptr);
   base::DictionaryValue dict;
@@ -184,6 +182,14 @@ TEST_F(SchemaMapTest, FilterBundle) {
            nullptr);
 
   schema_map->FilterBundle(&bundle);
+  // Merged twice so this causes a conflict.
+  expected_bundle.Get(chrome_ns)
+      .GetMutable("ChromePolicy")
+      ->AddConflictingPolicy(
+          *expected_bundle.Get(chrome_ns).Get("ChromePolicy"));
+  expected_bundle.Get(chrome_ns)
+      .GetMutable("ChromePolicy")
+      ->AddWarning(IDS_POLICY_CONFLICT_SAME_VALUE);
   EXPECT_TRUE(bundle.Equals(expected_bundle));
 
   // Mismatched types are also removed.
@@ -217,12 +223,13 @@ TEST_F(SchemaMapTest, FilterBundle) {
 TEST_F(SchemaMapTest, LegacyComponents) {
   std::string error;
   Schema schema = Schema::Parse(
-      "{"
-      "  \"type\":\"object\","
-      "  \"properties\": {"
-      "    \"String\": { \"type\": \"string\" }"
-      "  }"
-      "}", &error);
+      R"({
+        "type": "object",
+        "properties": {
+          "String": { "type": "string" }
+        }
+      })",
+      &error);
   ASSERT_TRUE(schema.valid()) << error;
 
   DomainMap domain_map;

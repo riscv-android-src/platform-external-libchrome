@@ -9,8 +9,8 @@
 #include "base/files/file_descriptor_watcher_posix.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "dbus/exported_object.h"
 #include "dbus/object_path.h"
@@ -129,8 +129,7 @@ TEST(BusTest, GetObjectProxyIgnoreUnknownService) {
 }
 
 TEST(BusTest, RemoveObjectProxy) {
-  // Setup the current thread's MessageLoop.
-  base::MessageLoop message_loop;
+  base::test::ScopedTaskEnvironment scoped_task_environment;
 
   // Start the D-Bus thread.
   base::Thread::Options thread_options;
@@ -321,7 +320,8 @@ TEST(BusTest, ListenForServiceOwnerChange) {
   base::MessageLoopForIO message_loop;
 
   // This enables FileDescriptorWatcher, which is required by dbus::Watch.
-  base::FileDescriptorWatcher file_descriptor_watcher(&message_loop);
+  base::FileDescriptorWatcher file_descriptor_watcher(
+      message_loop.task_runner());
 
   RunLoopWithExpectedCount run_loop_state;
 
@@ -402,14 +402,14 @@ TEST(BusTest, GetConnectionName) {
   scoped_refptr<Bus> bus = new Bus(options);
 
   // Connection name is empty since bus is not connected.
-  EXPECT_FALSE(bus->is_connected());
+  EXPECT_FALSE(bus->IsConnected());
   EXPECT_TRUE(bus->GetConnectionName().empty());
 
   // Connect bus to D-Bus.
   bus->Connect();
 
   // Connection name is not empty after connection is established.
-  EXPECT_TRUE(bus->is_connected());
+  EXPECT_TRUE(bus->IsConnected());
   EXPECT_FALSE(bus->GetConnectionName().empty());
 
   // Shut down synchronously.

@@ -21,6 +21,12 @@ struct PointF {
   float y;
 };
 
+struct Point3F {
+  float x;
+  float y;
+  float z;
+};
+
 struct Size {
   int32 width;
   int32 height;
@@ -69,7 +75,20 @@ struct Vector2dF {
   float y;
 };
 
+struct Vector3dF {
+  float x;
+  float y;
+  float z;
+};
+
 struct ScrollOffset {
   float x;
   float y;
+};
+
+struct Quaternion {
+  double x;
+  double y;
+  double z;
+  double w;
 };

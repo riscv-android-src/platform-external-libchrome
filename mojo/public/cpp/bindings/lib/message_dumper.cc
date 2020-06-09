@@ -4,6 +4,7 @@
 
 #include "mojo/public/cpp/bindings/message_dumper.h"
 
+#include "base/bind.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -12,7 +13,7 @@
 #include "base/process/process.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "mojo/public/cpp/bindings/message.h"
 
 namespace {
@@ -22,33 +23,35 @@ base::FilePath& DumpDirectory() {
   return *dump_directory;
 }
 
-// void WriteMessage(uint32_t identifier,
-//                   const mojo::MessageDumper::MessageEntry& entry) {
-//   static uint64_t num = 0;
+#if 0
+void WriteMessage(uint64_t identifier,
+                  const mojo::MessageDumper::MessageEntry& entry) {
+  static uint64_t num = 0;
 
-//   if (!entry.interface_name)
-//     return;
+  if (!entry.interface_name)
+    return;
 
-//   base::FilePath message_directory =
-//       DumpDirectory()
-//           .AppendASCII(entry.interface_name)
-//           .AppendASCII(base::NumberToString(identifier));
+  base::FilePath message_directory =
+      DumpDirectory()
+          .AppendASCII(entry.interface_name)
+          .AppendASCII(base::NumberToString(identifier));
 
-//   if (!base::DirectoryExists(message_directory) &&
-//       !base::CreateDirectory(message_directory)) {
-//     LOG(ERROR) << "Failed to create" << message_directory.value();
-//     return;
-//   }
+  if (!base::DirectoryExists(message_directory) &&
+      !base::CreateDirectory(message_directory)) {
+    LOG(ERROR) << "Failed to create" << message_directory.value();
+    return;
+  }
 
-//   std::string filename =
-//       base::NumberToString(num++) + "." + entry.method_name + ".mojomsg";
-//   base::FilePath path = message_directory.AppendASCII(filename);
-//   base::File file(path,
-//                   base::File::FLAG_WRITE | base::File::FLAG_CREATE_ALWAYS);
+  std::string filename =
+      base::NumberToString(num++) + "." + entry.method_name + ".mojomsg";
+  base::FilePath path = message_directory.AppendASCII(filename);
+  base::File file(path,
+                  base::File::FLAG_WRITE | base::File::FLAG_CREATE_ALWAYS);
 
-//   file.WriteAtCurrentPos(reinterpret_cast<const char*>(entry.data_bytes.data()),
-//                          static_cast<int>(entry.data_bytes.size()));
-// }
+  file.WriteAtCurrentPos(reinterpret_cast<const char*>(entry.data_bytes.data()),
+                         static_cast<int>(entry.data_bytes.size()));
+}
+#endif
 
 }  // namespace
 
@@ -71,17 +74,19 @@ MessageDumper::MessageDumper() : identifier_(base::RandUint64()) {}
 MessageDumper::~MessageDumper() {}
 
 bool MessageDumper::Accept(mojo::Message* message) {
-  // MessageEntry entry(message->data(), message->data_num_bytes(),
-  //                    "unknown interface", "unknown name");
+#if 0
+  MessageEntry entry(message->data(), message->data_num_bytes(),
+                     "unknown interface", "unknown name");
 
-  // static base::NoDestructor<scoped_refptr<base::TaskRunner>> task_runner(
-  //     base::CreateSequencedTaskRunnerWithTraits(
-  //         {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
-  //          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
+  static base::NoDestructor<scoped_refptr<base::TaskRunner>> task_runner(
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
+           base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}));
 
-  // (*task_runner)
-  //     ->PostTask(FROM_HERE,
-  //                base::BindOnce(&WriteMessage, identifier_, std::move(entry)));
+  (*task_runner)
+      ->PostTask(FROM_HERE,
+                 base::BindOnce(&WriteMessage, identifier_, std::move(entry)));
+#endif
   return true;
 }
 

@@ -47,7 +47,7 @@ mojo::MessagePipe pipe;
 // NOTE: Because pipes are bi-directional there is no implicit semantic
 // difference between |handle0| or |handle1| here. They're just two ends of a
 // pipe. The choice to treat one as a "client" and one as a "server" is entirely
-// a the API user's decision.
+// the API user's decision.
 mojo::ScopedMessagePipeHandle client = std::move(pipe.handle0);
 mojo::ScopedMessagePipeHandle server = std::move(pipe.handle1);
 ```
@@ -95,8 +95,8 @@ helpers for more strongly-typed data pipe usage:
 
 ``` cpp
 mojo::DataPipe pipe;
-mojo::ScopedDataPipeProducerHandle producer = std::move(pipe.producer);
-mojo::ScopedDataPipeConsumerHandle consumer = std::move(pipe.consumer);
+mojo::ScopedDataPipeProducerHandle producer = std::move(pipe.producer_handle);
+mojo::ScopedDataPipeConsumerHandle consumer = std::move(pipe.consumer_handle);
 
 // Or alternatively:
 mojo::ScopedDataPipeProducerHandle producer;
@@ -124,7 +124,7 @@ for detailed C++ data pipe API documentation.
 
 ## Shared Buffers
 
-A new shared buffers can be allocated like so:
+A new shared buffer can be allocated like so:
 
 ``` cpp
 mojo::ScopedSharedBufferHandle buffer =
@@ -145,10 +145,10 @@ memory:
 
 ``` cpp
 mojo::ScopedSharedBufferMapping mapping = buffer->Map(64);
-static_cast<int*>(mapping.get()) = 42;
+static_cast<int*>(mapping.get())[0] = 42;
 
 mojo::ScopedSharedBufferMapping another_mapping = buffer->MapAtOffset(64, 4);
-static_cast<int*>(mapping.get()) = 43;
+static_cast<int*>(mapping.get())[0] = 43;
 ```
 
 When `mapping` and `another_mapping` are destroyed, they automatically unmap
@@ -367,9 +367,7 @@ wait_set.AddHandle(b.handle0.get(), MOJO_HANDLE_SIGNAL_READABLE);
 wait_set.AddEvent(&timeout_event);
 
 // Ensure the Wait() lasts no more than 5 seconds.
-bg_thread->task_runner()->PostDelayedTask(
-    FROM_HERE,
-    base::Bind([](base::WaitableEvent* e) { e->Signal(); }, &timeout_event);
+bg_thread->task_runner()->PostDelayedTask(FROM_HERE, base::BindOnce([](base::WaitableEvent* e) { e->Signal(); }, &timeout_event);
     base::TimeDelta::FromSeconds(5));
 
 base::WaitableEvent* ready_event = nullptr;

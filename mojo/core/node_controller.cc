@@ -32,10 +32,6 @@
 #include <windows.h>
 #endif
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-#include "mojo/core/mach_port_relay.h"
-#endif
-
 #if !defined(OS_NACL)
 #include "crypto/random.h"
 #endif
@@ -101,8 +97,10 @@ ports::ScopedEvent DeserializeEventMessage(
   auto message = UserMessageImpl::CreateFromChannelMessage(
       message_event.get(), std::move(channel_message),
       static_cast<uint8_t*>(data) + event_size, size - event_size);
-  message->set_source_node(from_node);
+  if (!message)
+    return nullptr;
 
+  message->set_source_node(from_node);
   message_event->AttachMessage(std::move(message));
   return std::move(message_event);
 }
@@ -120,7 +118,7 @@ class ThreadDestructionObserver
       new ThreadDestructionObserver(callback);
     } else {
       task_runner->PostTask(FROM_HERE,
-                            base::Bind(&Create, task_runner, callback));
+                            base::BindOnce(&Create, task_runner, callback));
     }
   }
 
@@ -155,14 +153,6 @@ NodeController::NodeController(Core* core)
       node_(new ports::Node(name_, this)) {
   DVLOG(1) << "Initializing node " << name_;
 }
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-void NodeController::CreateMachPortRelay(base::PortProvider* port_provider) {
-  base::AutoLock lock(mach_port_relay_lock_);
-  DCHECK(!mach_port_relay_);
-  mach_port_relay_.reset(new MachPortRelay(port_provider));
-}
-#endif
 
 void NodeController::SetIOTaskRunner(
     scoped_refptr<base::TaskRunner> task_runner) {
@@ -318,6 +308,22 @@ void NodeController::NotifyBadMessageFrom(const ports::NodeName& source_node,
     peer->NotifyBadMessage(error);
 }
 
+// static
+void NodeController::DeserializeRawBytesAsEventForFuzzer(
+    base::span<const unsigned char> data) {
+  void* payload;
+  auto message = NodeChannel::CreateEventMessage(0, data.size(), &payload, 0);
+  DCHECK(message);
+  std::copy(data.begin(), data.end(), static_cast<unsigned char*>(payload));
+  DeserializeEventMessage(ports::NodeName(), std::move(message));
+}
+
+// static
+void NodeController::DeserializeMessageAsEventForFuzzer(
+    Channel::MessagePtr message) {
+  DeserializeEventMessage(ports::NodeName(), std::move(message));
+}
+
 void NodeController::SendBrokerClientInvitationOnIOThread(
     ScopedProcessHandle target_process,
     ConnectionParams connection_params,
@@ -351,13 +357,14 @@ void NodeController::SendBrokerClientInvitationOnIOThread(
 
   scoped_refptr<NodeChannel> channel =
       NodeChannel::Create(this, std::move(node_connection_params),
+                          Channel::HandlePolicy::kAcceptHandles,
                           io_task_runner_, process_error_callback);
 
-#else   // !defined(OS_MACOSX) && !defined(OS_NACL)
-  scoped_refptr<NodeChannel> channel =
-      NodeChannel::Create(this, std::move(connection_params), io_task_runner_,
-                          process_error_callback);
-#endif  // !defined(OS_MACOSX) && !defined(OS_NACL)
+#else   // !defined(OS_MACOSX) && !defined(OS_NACL) && !defined(OS_FUCHSIA)
+  scoped_refptr<NodeChannel> channel = NodeChannel::Create(
+      this, std::move(connection_params), Channel::HandlePolicy::kAcceptHandles,
+      io_task_runner_, process_error_callback);
+#endif  // !defined(OS_MACOSX) && !defined(OS_NACL) && !defined(OS_FUCHSIA)
 
   // We set up the invitee channel with a temporary name so it can be identified
   // as a pending invitee if it writes any messages to the channel. We may start
@@ -385,8 +392,9 @@ void NodeController::AcceptBrokerClientInvitationOnIOThread(
     // into our |peers_| map. That will happen as soon as we receive an
     // AcceptInvitee message from them.
     bootstrap_inviter_channel_ =
-        NodeChannel::Create(this, std::move(connection_params), io_task_runner_,
-                            ProcessErrorCallback());
+        NodeChannel::Create(this, std::move(connection_params),
+                            Channel::HandlePolicy::kAcceptHandles,
+                            io_task_runner_, ProcessErrorCallback());
     // Prevent the inviter pipe handle from being closed on shutdown. Pipe
     // closure may be used by the inviter to detect the invitee process has
     // exited.
@@ -401,8 +409,12 @@ void NodeController::ConnectIsolatedOnIOThread(
     const std::string& connection_name) {
   DCHECK(io_task_runner_->RunsTasksInCurrentSequence());
 
+  // Processes using isolated connections to communicate have no ability to lean
+  // on a broker for handle relaying, so we allow them to send handles to each
+  // other at their own peril.
   scoped_refptr<NodeChannel> channel = NodeChannel::Create(
-      this, std::move(connection_params), io_task_runner_, {});
+      this, std::move(connection_params), Channel::HandlePolicy::kAcceptHandles,
+      io_task_runner_, {});
 
   RequestContext request_context;
   ports::NodeName token;
@@ -580,28 +592,6 @@ void NodeController::SendPeerEvent(const ports::NodeName& name,
     scoped_refptr<NodeChannel> broker = GetBrokerChannel();
     if (!peer || !peer->HasRemoteProcessHandle()) {
       if (!GetConfiguration().is_broker_process && broker) {
-        broker->RelayEventMessage(name, std::move(event_message));
-      } else {
-        base::AutoLock lock(broker_lock_);
-        pending_relay_messages_[name].emplace(std::move(event_message));
-      }
-      return;
-    }
-  }
-#elif defined(OS_MACOSX) && !defined(OS_IOS)
-  if (event_message->has_mach_ports()) {
-    // Messages containing Mach ports are always routed through the broker, even
-    // if the broker process is the intended recipient.
-    bool use_broker = false;
-    if (!GetConfiguration().is_broker_process) {
-      base::AutoLock lock(inviter_lock_);
-      use_broker = (bootstrap_inviter_channel_ ||
-                    inviter_name_ != ports::kInvalidNodeName);
-    }
-
-    if (use_broker) {
-      scoped_refptr<NodeChannel> broker = GetBrokerChannel();
-      if (broker) {
         broker->RelayEventMessage(name, std::move(event_message));
       } else {
         base::AutoLock lock(broker_lock_);
@@ -834,9 +824,9 @@ void NodeController::OnAddBrokerClient(const ports::NodeName& from_node,
 
   PlatformChannel broker_channel;
   ConnectionParams connection_params(broker_channel.TakeLocalEndpoint());
-  scoped_refptr<NodeChannel> client =
-      NodeChannel::Create(this, std::move(connection_params), io_task_runner_,
-                          ProcessErrorCallback());
+  scoped_refptr<NodeChannel> client = NodeChannel::Create(
+      this, std::move(connection_params), Channel::HandlePolicy::kAcceptHandles,
+      io_task_runner_, ProcessErrorCallback());
 
 #if defined(OS_WIN)
   // The broker must have a working handle to the client process in order to
@@ -916,7 +906,8 @@ void NodeController::OnAcceptBrokerClient(const ports::NodeName& from_node,
     broker = NodeChannel::Create(
         this,
         ConnectionParams(PlatformChannelEndpoint(std::move(broker_channel))),
-        io_task_runner_, ProcessErrorCallback());
+        Channel::HandlePolicy::kAcceptHandles, io_task_runner_,
+        ProcessErrorCallback());
     AddPeer(broker_name, broker, true /* start_channel */);
   }
 
@@ -944,7 +935,7 @@ void NodeController::OnAcceptBrokerClient(const ports::NodeName& from_node,
     pending_broker_clients.pop();
   }
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
   // Have the broker relay any messages we have waiting.
   for (auto& entry : pending_relay_messages) {
     const ports::NodeName& destination = entry.first;
@@ -1057,10 +1048,18 @@ void NodeController::OnIntroduce(const ports::NodeName& from_node,
     return;
   }
 
+#if defined(OS_WIN)
+  // Introduced peers are never our broker nor our inviter, so we never accept
+  // handles from them directly.
+  constexpr auto kPeerHandlePolicy = Channel::HandlePolicy::kRejectHandles;
+#else
+  constexpr auto kPeerHandlePolicy = Channel::HandlePolicy::kAcceptHandles;
+#endif
+
   scoped_refptr<NodeChannel> channel = NodeChannel::Create(
       this,
       ConnectionParams(PlatformChannelEndpoint(std::move(channel_handle))),
-      io_task_runner_, ProcessErrorCallback());
+      kPeerHandlePolicy, io_task_runner_, ProcessErrorCallback());
 
   DVLOG(1) << "Adding new peer " << name << " via broker introduction.";
   AddPeer(name, channel, true /* start_channel */);
@@ -1095,7 +1094,7 @@ void NodeController::OnBroadcast(const ports::NodeName& from_node,
   }
 }
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
 void NodeController::OnRelayEventMessage(const ports::NodeName& from_node,
                                          base::ProcessHandle from_process,
                                          const ports::NodeName& destination,
@@ -1183,24 +1182,10 @@ void NodeController::OnChannelError(const ports::NodeName& from_node,
   } else {
     io_task_runner_->PostTask(
         FROM_HERE,
-        base::Bind(&NodeController::OnChannelError, base::Unretained(this),
-                   from_node, base::RetainedRef(channel)));
+        base::BindOnce(&NodeController::OnChannelError, base::Unretained(this),
+                       from_node, base::RetainedRef(channel)));
   }
 }
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-MachPortRelay* NodeController::GetMachPortRelay() {
-  {
-    base::AutoLock lock(inviter_lock_);
-    // Return null if we're not the root.
-    if (bootstrap_inviter_channel_ || inviter_name_ != ports::kInvalidNodeName)
-      return nullptr;
-  }
-
-  base::AutoLock lock(mach_port_relay_lock_);
-  return mach_port_relay_.get();
-}
-#endif
 
 void NodeController::CancelPendingPortMerges() {
   std::vector<ports::PortRef> ports_to_close;

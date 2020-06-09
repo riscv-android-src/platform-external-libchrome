@@ -46,7 +46,8 @@ class POLICY_EXPORT PolicyServiceImpl
   void RefreshPolicies(const base::Closure& callback) override;
 
  private:
-  using Observers = base::ObserverList<PolicyService::Observer, true>;
+  using Observers =
+      base::ObserverList<PolicyService::Observer, true>::Unchecked;
 
   // ConfigurationPolicyProvider::Observer overrides:
   void OnUpdatePolicy(ConfigurationPolicyProvider* provider) override;
@@ -93,7 +94,7 @@ class POLICY_EXPORT PolicyServiceImpl
 
   // Used to create tasks to delay new policy updates while we may be already
   // processing previous policy updates.
-  base::WeakPtrFactory<PolicyServiceImpl> update_task_ptr_factory_;
+  base::WeakPtrFactory<PolicyServiceImpl> update_task_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(PolicyServiceImpl);
 };

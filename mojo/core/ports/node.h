@@ -12,6 +12,7 @@
 #include <unordered_map>
 
 #include "base/component_export.h"
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -43,6 +44,7 @@ struct PortStatus {
   bool peer_remote;
   size_t queued_message_count;
   size_t queued_num_bytes;
+  size_t unacknowledged_message_count;
 };
 
 class MessageFilter;
@@ -139,6 +141,16 @@ class COMPONENT_EXPORT(MOJO_CORE_PORTS) Node {
   int SendUserMessage(const PortRef& port_ref,
                       std::unique_ptr<UserMessageEvent> message);
 
+  // Makes the port send acknowledge requests to its conjugate to acknowledge
+  // at least every |sequence_number_acknowledge_interval| messages as they're
+  // read from the conjugate. The number of unacknowledged messages is exposed
+  // in the |unacknowledged_message_count| field of PortStatus. This allows
+  // bounding the number of unread and/or in-transit messages from this port
+  // to its conjugate between zero and |unacknowledged_message_count|.
+  int SetAcknowledgeRequestInterval(
+      const PortRef& port_ref,
+      uint64_t sequence_number_acknowledge_interval);
+
   // Corresponding to NodeDelegate::ForwardEvent.
   int AcceptEvent(ScopedEvent event);
 
@@ -199,6 +211,9 @@ class COMPONENT_EXPORT(MOJO_CORE_PORTS) Node {
   int OnObserveProxyAck(std::unique_ptr<ObserveProxyAckEvent> event);
   int OnObserveClosure(std::unique_ptr<ObserveClosureEvent> event);
   int OnMergePort(std::unique_ptr<MergePortEvent> event);
+  int OnUserMessageReadAckRequest(
+      std::unique_ptr<UserMessageReadAckRequestEvent> event);
+  int OnUserMessageReadAck(std::unique_ptr<UserMessageReadAckEvent> event);
 
   int AddPortWithName(const PortName& port_name, scoped_refptr<Port> port);
   void ErasePort(const PortName& port_name);
@@ -227,18 +242,74 @@ class COMPONENT_EXPORT(MOJO_CORE_PORTS) Node {
   void DestroyAllPortsWithPeer(const NodeName& node_name,
                                const PortName& port_name);
 
+  // Changes the peer node and port name referenced by |port|. Note that both
+  // |ports_lock_| MUST be held through the extent of this method.
+  // |local_port|'s lock must be held if and only if a reference to |local_port|
+  // exist in |ports_|.
+  void UpdatePortPeerAddress(const PortName& local_port_name,
+                             Port* local_port,
+                             const NodeName& new_peer_node,
+                             const PortName& new_peer_port);
+
+  // Removes an entry from |peer_port_map_| corresponding to |local_port|'s peer
+  // address, if valid.
+  void RemoveFromPeerPortMap(const PortName& local_port_name, Port* local_port);
+
+  // Swaps the peer information for two local ports. Used during port merges.
+  // Note that |ports_lock_| must be held along with each of the two port's own
+  // locks, through the extent of this method.
+  void SwapPortPeers(const PortName& port0_name,
+                     Port* port0,
+                     const PortName& port1_name,
+                     Port* port1);
+
+  // Sends an acknowledge request to the peer if the port has a non-zero
+  // |sequence_num_acknowledge_interval|. This needs to be done when the port's
+  // peer changes, as the previous peer proxy may not have forwarded any prior
+  // acknowledge request before deleting itself.
+  void MaybeResendAckRequest(const PortRef& port_ref);
+
+  // Forwards a stored acknowledge request to the peer if the proxy has a
+  // non-zero |sequence_num_acknowledge_interval|.
+  void MaybeForwardAckRequest(const PortRef& port_ref);
+
+  // Sends an acknowledge of the most recently read sequence number to the peer
+  // if any messages have been read, and the port has a non-zero
+  // |sequence_num_to_acknowledge|.
+  void MaybeResendAck(const PortRef& port_ref);
+
   const NodeName name_;
   const DelegateHolder delegate_;
 
-  // Guards |ports_|. This must never be acquired while an individual port's
-  // lock is held on the same thread. Conversely, individual port locks may be
-  // acquired while this one is held.
+  // Just to clarify readability of the types below.
+  using LocalPortName = PortName;
+  using PeerPortName = PortName;
+
+  // Guards access to |ports_| and |peer_port_maps_| below.
+  //
+  // This must never be acquired while an individual port's lock is held on the
+  // same thread. Conversely, individual port locks may be acquired while this
+  // one is held.
   //
   // Because UserMessage events may execute arbitrary user code during
   // destruction, it is also important to ensure that such events are never
   // destroyed while this (or any individual Port) lock is held.
   base::Lock ports_lock_;
-  std::unordered_map<PortName, scoped_refptr<Port>> ports_;
+  std::unordered_map<LocalPortName, scoped_refptr<Port>> ports_;
+
+  // Maps a peer port name to a list of PortRefs for all local ports which have
+  // the port name key designated as their peer port. The set of local ports
+  // which have the same peer port is expected to always be relatively small and
+  // usually 1. Hence we just use a flat_map of local PortRefs keyed on each
+  // local port's name.
+  using PeerPortMap =
+      std::unordered_map<PeerPortName, base::flat_map<LocalPortName, PortRef>>;
+
+  // A reverse mapping which can be used to find all local ports that reference
+  // a given peer node or a local port that references a specific given peer
+  // port on a peer node. The key to this map is the corresponding peer node
+  // name.
+  std::unordered_map<NodeName, PeerPortMap> peer_port_maps_;
 
   DISALLOW_COPY_AND_ASSIGN(Node);
 };

@@ -89,7 +89,7 @@ std::unique_ptr<base::Value> DecodeJsonProto(const em::StringPolicyProto& proto,
                                              std::string* error) {
   const std::string& json = proto.value();
   std::unique_ptr<base::Value> parsed_value =
-      base::JSONReader::ReadAndReturnError(
+      base::JSONReader::ReadAndReturnErrorDeprecated(
           json, base::JSON_ALLOW_TRAILING_COMMAS, nullptr, error);
 
   if (!parsed_value) {
@@ -142,7 +142,7 @@ void DecodeProtoFields(
     map->Set(access->policy_key, level, scope, source,
              DecodeIntegerProto(proto, &error), nullptr);
     if (!error.empty())
-      map->SetError(access->policy_key, error);
+      map->AddError(access->policy_key, error);
   }
 
   for (const StringPolicyAccess* access = &kStringPolicyAccess[0];
@@ -169,7 +169,7 @@ void DecodeProtoFields(
     map->Set(access->policy_key, level, scope, source, std::move(value),
              std::move(external_data_fetcher));
     if (!error.empty())
-      map->SetError(access->policy_key, error);
+      map->AddError(access->policy_key, error);
   }
 
   for (const StringListPolicyAccess* access = &kStringListPolicyAccess[0];

@@ -2,21 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/android/early_trace_event_binding.h"
+
 #include <stdint.h>
 
 #include "base/android/jni_string.h"
+#include "base/base_jni_headers/EarlyTraceEvent_jni.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
-#include "jni/EarlyTraceEvent_jni.h"
 
 namespace base {
 namespace android {
 
-const char kEarlyJavaCategory[] = "EarlyJava";
+constexpr const char kEarlyJavaCategory[] = "EarlyJava";
 
 static void JNI_EarlyTraceEvent_RecordEarlyEvent(
     JNIEnv* env,
-    const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jstring>& jname,
     jlong begin_time_ns,
     jlong end_time_ns,
@@ -37,7 +38,6 @@ static void JNI_EarlyTraceEvent_RecordEarlyEvent(
 
 static void JNI_EarlyTraceEvent_RecordEarlyStartAsyncEvent(
     JNIEnv* env,
-    const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jstring>& jname,
     jlong id,
     jlong timestamp_ns) {
@@ -51,7 +51,6 @@ static void JNI_EarlyTraceEvent_RecordEarlyStartAsyncEvent(
 
 static void JNI_EarlyTraceEvent_RecordEarlyFinishAsyncEvent(
     JNIEnv* env,
-    const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jstring>& jname,
     jlong id,
     jlong timestamp_ns) {
@@ -61,6 +60,18 @@ static void JNI_EarlyTraceEvent_RecordEarlyFinishAsyncEvent(
   TRACE_EVENT_COPY_ASYNC_END_WITH_TIMESTAMP0(
       kEarlyJavaCategory, name.c_str(), id,
       base::TimeTicks() + base::TimeDelta::FromMicroseconds(timestamp_us));
+}
+
+bool GetBackgroundStartupTracingFlag() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  return base::android::Java_EarlyTraceEvent_getBackgroundStartupTracingFlag(
+      env);
+}
+
+void SetBackgroundStartupTracingFlag(bool enabled) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  base::android::Java_EarlyTraceEvent_setBackgroundStartupTracingFlag(env,
+                                                                      enabled);
 }
 
 }  // namespace android

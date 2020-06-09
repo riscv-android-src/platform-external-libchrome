@@ -59,7 +59,7 @@ class NodeChannel : public base::RefCountedThreadSafe<NodeChannel>,
                              PlatformHandle channel_handle) = 0;
     virtual void OnBroadcast(const ports::NodeName& from_node,
                              Channel::MessagePtr message) = 0;
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
     virtual void OnRelayEventMessage(const ports::NodeName& from_node,
                                      base::ProcessHandle from_process,
                                      const ports::NodeName& destination,
@@ -79,6 +79,7 @@ class NodeChannel : public base::RefCountedThreadSafe<NodeChannel>,
   static scoped_refptr<NodeChannel> Create(
       Delegate* delegate,
       ConnectionParams connection_params,
+      Channel::HandlePolicy channel_handle_policy,
       scoped_refptr<base::TaskRunner> io_task_runner,
       const ProcessErrorCallback& process_error_callback);
 
@@ -90,6 +91,8 @@ class NodeChannel : public base::RefCountedThreadSafe<NodeChannel>,
   static void GetEventMessageData(Channel::Message* message,
                                   void** data,
                                   size_t* num_data_bytes);
+
+  Channel* channel() const { return channel_.get(); }
 
   // Start receiving messages.
   void Start();
@@ -130,7 +133,7 @@ class NodeChannel : public base::RefCountedThreadSafe<NodeChannel>,
   void SendChannelMessage(Channel::MessagePtr message);
   void Broadcast(Channel::MessagePtr message);
 
-#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_WIN)
   // Relay the message to the specified node via this channel.  This is used to
   // pass windows handles between two processes that do not have permission to
   // duplicate handles into the other's address space. The relay process is
@@ -154,6 +157,7 @@ class NodeChannel : public base::RefCountedThreadSafe<NodeChannel>,
 
   NodeChannel(Delegate* delegate,
               ConnectionParams connection_params,
+              Channel::HandlePolicy channel_handle_policy,
               scoped_refptr<base::TaskRunner> io_task_runner,
               const ProcessErrorCallback& process_error_callback);
   ~NodeChannel() override;

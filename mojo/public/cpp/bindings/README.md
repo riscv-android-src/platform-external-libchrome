@@ -10,21 +10,21 @@ set of primitives for communicating over Mojo message pipes. Combined with
 generated code from the
 [Mojom IDL and bindings generator](/mojo/public/tools/bindings/README.md), users
 can easily connect interface clients and implementations across arbitrary intra-
-and inter-process bounaries.
+and inter-process boundaries.
 
 This document provides a detailed guide to bindings API usage with example code
 snippets. For a detailed API references please consult the headers in
 [//mojo/public/cpp/bindings](https://cs.chromium.org/chromium/src/mojo/public/cpp/bindings/README.md).
 
 For a simplified guide targeted at Chromium developers, see [this
-link](/docs/mojo_guide.md).
+link](/docs/mojo_and_services.md).
 
 ## Getting Started
 
 When a Mojom IDL file is processed by the bindings generator, C++ code is
 emitted in a series of `.h` and `.cc` files with names based on the input
 `.mojom` file. Suppose we create the following Mojom file at
-`//services/db/public/interfaces/db.mojom`:
+`//services/db/public/mojom/db.mojom`:
 
 ```
 module db.mojom;
@@ -39,12 +39,12 @@ interface Database {
 ```
 
 And a GN target to generate the bindings in
-`//services/db/public/interfaces/BUILD.gn`:
+`//services/db/public/mojom/BUILD.gn`:
 
 ```
 import("//mojo/public/tools/bindings/mojom.gni")
 
-mojom("interfaces") {
+mojom("mojom") {
   sources = [
     "db.mojom",
   ]
@@ -54,28 +54,28 @@ mojom("interfaces") {
 Ensure that any target that needs this interface depends on it, e.g. with a line like:
 
 ```
-   deps += [ '//services/db/public/interfaces' ]
+   deps += [ '//services/db/public/mojom' ]
 ```
 
 If we then build this target:
 
 ```
-ninja -C out/r services/db/public/interfaces
+ninja -C out/r services/db/public/mojom
 ```
 
 This will produce several generated source files, some of which are relevant to
 C++ bindings. Two of these files are:
 
 ```
-out/gen/services/db/public/interfaces/db.mojom.cc
-out/gen/services/db/public/interfaces/db.mojom.h
+out/gen/services/db/public/mojom/db.mojom.cc
+out/gen/services/db/public/mojom/db.mojom.h
 ```
 
 You can include the above generated header in your sources in order to use the
 definitions therein:
 
 ``` cpp
-#include "services/business/public/interfaces/factory.mojom.h"
+#include "services/business/public/mojom/factory.mojom.h"
 
 class TableImpl : public db::mojom::Table {
   // ...
@@ -153,7 +153,7 @@ routed to some implementation which will **bind** it. The `InterfaceRequest<T>`
 doesn't actually *do* anything other than hold onto a pipe endpoint and carry
 useful compile-time type information.
 
-![Diagram illustrating InterfacePtr and InterfaceRequest on either end of a message pipe](https://docs.google.com/drawings/d/1_Ocprq7EGgTKcSE_WlOn_RBfXcr5C3FJyIbWhwzwNX8/pub?w=608&h=100)
+![Diagram illustrating InterfacePtr and InterfaceRequest on either end of a message pipe](/docs/images/mojo_pipe.png)
 
 So how do we create a strongly-typed message pipe?
 
@@ -211,7 +211,7 @@ logger->Log("Hello!");
 
 This actually writes a `Log` message to the pipe.
 
-![Diagram illustrating a message traveling on a pipe from LoggerPtr to LoggerRequest](https://docs.google.com/drawings/d/11vnOpNP3UBLlWg4KplQuIU3r_e1XqwDFETD-O_bV-2w/pub?w=635&h=112)
+![Diagram illustrating a message traveling on a pipe from LoggerPtr to LoggerRequest](/docs/images/mojo_message.png)
 
 But as mentioned above, `InterfaceRequest` *doesn't actually do anything*, so
 that message will just sit on the pipe forever. We need a way to read messages
@@ -278,7 +278,7 @@ motion by the above line of code:
 3. The `Log` message is read and deserialized, causing the `Binding` to invoke
    the `Logger::Log` implementation on its bound `LoggerImpl`.
 
-![Diagram illustrating the progression of binding a request, reading a pending message, and dispatching it](https://docs.google.com/drawings/d/1F2VvfoOINGuNibomqeEU8KekYCtxYVFC00146CFGGQY/pub?w=550&h=500)
+![Diagram illustrating the progression of binding a request, reading a pending message, and dispatching it](/docs/images/mojo_binding_and_dispatch.png)
 
 As a result, our implementation will eventually log the client's `"Hello!"`
 message via `LOG(ERROR)`.
@@ -327,7 +327,9 @@ class Logger {
 As before, both clients and implementations of this interface use the same
 signature for the `GetTail` method: implementations use the `callback` argument
 to *respond* to the request, while clients pass a `callback` argument to
-asynchronously `receive` the response. Here's an updated implementation:
+asynchronously `receive` the response. A client's `callback` runs on the same
+sequence on which they invoked `GetTail` (the sequence to which their `logger`
+is bound). Here's an updated implementation:
 
 ```cpp
 class LoggerImpl : public sample::mojom::Logger {
@@ -382,7 +384,7 @@ which case that endpoint won't get such a notification). If there are remaining
 incoming messages for an endpoint on disconnection, the connection error won't
 be triggered until the messages are drained.
 
-Pipe disconnecition may be caused by:
+Pipe disconnection may be caused by:
 * Mojo system-level causes: process terminated, resource exhausted, etc.
 * The bindings close the pipe due to a validation error when processing a
   received message.
@@ -601,7 +603,7 @@ roughly equivalent to a `std::unique_ptr` with some additional utility methods.
 This allows struct values to be nullable and struct types to be potentially
 self-referential.
 
-Every genereated struct class has a static `New()` method which returns a new
+Every generated struct class has a static `New()` method which returns a new
 `mojo::StructPtr<T>` wrapping a new instance of the class constructed by
 forwarding the arguments from `New`. For example:
 
@@ -655,7 +657,7 @@ Similarly to [structs](#Structs), tagged unions generate an identically named,
 representative C++ class which is typically wrapped in a `mojo::StructPtr<T>`.
 
 Unlike structs, all generated union fields are private and must be retrieved and
-manipulated using accessors. A field `foo` is accessible by `foo()` and
+manipulated using accessors. A field `foo` is accessible by `get_foo()` and
 settable by `set_foo()`. There is also a boolean `is_foo()` for each field which
 indicates whether the union is currently taking on the value of field `foo` in
 exclusion to all other union fields.
@@ -669,7 +671,7 @@ For example, consider the following Mojom definitions:
 ```cpp
 union Value {
   int64 int_value;
-  float32 float_value;
+  float float_value;
   string string_value;
 };
 
@@ -678,12 +680,17 @@ interface Dictionary {
 };
 ```
 
-This generates a the following C++ interface:
+This generates the following C++ interface:
 
 ```cpp
 class Value {
  public:
-  virtual ~Value() {}
+  ~Value() {}
+};
+
+class Dictionary {
+ public:
+  virtual ~Dictionary() {}
 
   virtual void AddValue(const std::string& key, ValuePtr value) = 0;
 };
@@ -1133,7 +1140,7 @@ Similarly, assume you have already got an `InterfacePtr<Foo> foo_ptr`, and you
 would like to call `SetBar()` on it. You can do:
 
 ``` cpp
-AssociatedBind<Bar> bar_binding(some_bar_impl);
+AssociatedBinding<Bar> bar_binding(some_bar_impl);
 BarAssociatedPtrInfo bar_ptr_info;
 BarAssociatedRequest bar_request = MakeRequest(&bar_ptr_info);
 foo_ptr->SetBar(std::move(bar_ptr_info));
@@ -1143,7 +1150,7 @@ bar_binding.Bind(std::move(bar_request));
 The following code achieves the same purpose:
 
 ``` cpp
-AssociatedBind<Bar> bar_binding(some_bar_impl);
+AssociatedBinding<Bar> bar_binding(some_bar_impl);
 BarAssociatedPtrInfo bar_ptr_info;
 bar_binding.Bind(&bar_ptr_info);
 foo_ptr->SetBar(std::move(bar_ptr_info));
@@ -1170,9 +1177,9 @@ over one end of the master interface, or over one end of another associated
 interface which itself already has a master interface.
 
 If you want to test an associated interface endpoint without first
-associating it, you can use `mojo::MakeIsolatedRequest()`. This will create
-working associated interface endpoints which are not actually associated with
-anything else.
+associating it, you can use `mojo::MakeRequestAssociatedWithDedicatedPipe`. This
+will create working associated interface endpoints which are not actually
+associated with anything else.
 
 ### Read more
 
@@ -1180,9 +1187,98 @@ anything else.
 
 ## Synchronous Calls
 
-See [this document](https://www.chromium.org/developers/design-documents/mojo/synchronous-calls)
+### Think carefully before you decide to use sync calls
 
-TODO: Move the above doc into the repository markdown docs.
+Although sync calls are convenient, you should avoid them whenever they
+are not absolutely necessary:
+
+* Sync calls hurt parallelism and therefore hurt performance.
+* Re-entrancy changes message order and produces call stacks that you
+probably never think about while you are coding. It has always been a
+huge pain.
+* Sync calls may lead to deadlocks.
+
+### Mojom changes
+
+A new attribute `[Sync]` (or `[Sync=true]`) is introduced for methods.
+For example:
+
+``` cpp
+interface Foo {
+  [Sync]
+  SomeSyncCall() => (Bar result);
+};
+```
+
+It indicates that when `SomeSyncCall()` is called, the control flow of
+the calling thread is blocked until the response is received.
+
+It is not allowed to use this attribute with functions that don’t have
+responses. If you just need to wait until the service side finishes
+processing the call, you can use an empty response parameter list:
+
+``` cpp
+[Sync]
+SomeSyncCallWithNoResult() => ();
+```
+
+### Generated bindings (C++)
+
+The generated C++ interface of the Foo interface above is:
+
+``` cpp
+class Foo {
+ public:
+  // The service side implements this signature. The client side can
+  // also use this signature if it wants to call the method asynchronously.
+  virtual void SomeSyncCall(SomeSyncCallCallback callback) = 0;
+
+  // The client side uses this signature to call the method synchronously.
+  virtual bool SomeSyncCall(BarPtr* result);
+};
+```
+
+As you can see, the client side and the service side use different
+signatures. At the client side, response is mapped to output parameters
+and the boolean return value indicates whether the operation is
+successful. (Returning false usually means a connection error has
+occurred.)
+
+At the service side, a signature with callback is used. The reason is
+that in some cases the implementation may need to do some asynchronous
+work which the sync method’s result depends on.
+
+*** note
+**NOTE:** you can also use the signature with callback at the client side to
+call the method asynchronously.
+***
+
+### Re-entrancy
+
+What happens on the calling thread while waiting for the response of a
+sync method call? It continues to process incoming sync request messages
+(i.e., sync method calls); block other messages, including async
+messages and sync response messages that don’t match the ongoing sync
+call.
+
+![Diagram illustrating sync call flow](/docs/images/mojo_sync_call_flow.png)
+
+Please note that sync response messages that don’t match the ongoing
+sync call cannot re-enter. That is because they correspond to sync calls
+down in the call stack. Therefore, they need to be queued and processed
+while the stack unwinds.
+
+### Avoid deadlocks
+
+Please note that the re-entrancy behavior doesn’t prevent deadlocks
+involving async calls. You need to avoid call sequences such as:
+
+![Diagram illustrating a sync call deadlock](/docs/images/mojo_sync_call_deadlock.png)
+
+### Read more
+
+* [Design Proposal: Mojo Sync Methods](
+https://docs.google.com/document/d/1dixzFzZQW8e3ldjdM8Adbo8klXDDE4pVekwo5aLgUsE)
 
 ## Type Mapping
 
@@ -1275,10 +1371,10 @@ some less common requirements. See
 
 In order to define the mapping for `gfx::Rect`, we want the following
 `StructTraits` specialization, which we'll define in
-`//ui/gfx/geometry/mojo/geometry_struct_traits.h`:
+`//ui/gfx/geometry/mojo/geometry_mojom_traits.h`:
 
 ``` cpp
-#include "mojo/public/cpp/bindings/struct_traits.h"
+#include "mojo/public/cpp/bindings/mojom_traits.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/mojo/geometry.mojom.h"
 
@@ -1298,10 +1394,10 @@ class StructTraits<gfx::mojom::RectDataView, gfx::Rect> {
 }  // namespace mojo
 ```
 
-And in `//ui/gfx/geometry/mojo/geometry_struct_traits.cc`:
+And in `//ui/gfx/geometry/mojo/geometry_mojom_traits.cc`:
 
 ``` cpp
-#include "ui/gfx/geometry/mojo/geometry_struct_traits.h"
+#include "ui/gfx/geometry/mojo/geometry_mojom_traits.h"
 
 namespace mojo {
 
@@ -1327,6 +1423,35 @@ height, its message will be rejected and the pipe will be closed. In this way,
 type mapping can serve to enable custom validation logic in addition to making
 callsites and interface implemention more convenient.
 
+When the struct fields have non-primitive types, e.g. string or array,
+returning a read-only view of the data in the accessor is recommended to
+avoid copying. It is safe because the input object is guaranteed to
+outlive the usage of the result returned by the accessor method.
+
+The following example uses `StringPiece` to return a view of the GURL's
+data (`//url/mojom/url_gurl_mojom_traits.h`):
+
+``` cpp
+#include "base/strings/string_piece.h"
+#include "url/gurl.h"
+#include "url/mojom/url.mojom.h"
+#include "url/url_constants.h"
+
+namespace mojo {
+
+template <>
+struct StructTraits<url::mojom::UrlDataView, GURL> {
+  static base::StringPiece url(const GURL& r) {
+    if (r.possibly_invalid_spec().length() > url::kMaxURLChars ||
+        !r.is_valid()) {
+      return base::StringPiece();
+    }
+    return base::StringPiece(r.possibly_invalid_spec().c_str(),
+                             r.possibly_invalid_spec().length());
+  }
+}  // namespace mojo
+```
+
 ### Enabling a New Type Mapping
 
 We've defined the `StructTraits` necessary, but we still need to teach the
@@ -1338,11 +1463,12 @@ Let's place this `geometry.typemap` file alongside our Mojom file:
 
 ```
 mojom = "//ui/gfx/geometry/mojo/geometry.mojom"
+os_whitelist = [ "android" ]
 public_headers = [ "//ui/gfx/geometry/rect.h" ]
-traits_headers = [ "//ui/gfx/geometry/mojo/geometry_struct_traits.h" ]
+traits_headers = [ "//ui/gfx/geometry/mojo/geometry_mojom_traits.h" ]
 sources = [
-  "//ui/gfx/geometry/mojo/geometry_struct_traits.cc",
-  "//ui/gfx/geometry/mojo/geometry_struct_traits.h",
+  "//ui/gfx/geometry/mojo/geometry_mojom_traits.cc",
+  "//ui/gfx/geometry/mojo/geometry_mojom_traits.h",
 ]
 public_deps = [ "//ui/gfx/geometry" ]
 type_mappings = [
@@ -1355,15 +1481,17 @@ Let's look at each of the variables above:
 * `mojom`: Specifies the `mojom` file to which the typemap applies. Many
   typemaps may apply to the same `mojom` file, but any given typemap may only
   apply to a single `mojom` file.
+* `os_whitelist`: Optional list of specific platforms this typemap
+  should be constrained to.
 * `public_headers`: Additional headers required by any code which would depend
   on the Mojom definition of `gfx.mojom.Rect` now that the typemap is applied.
   Any headers required for the native target type definition should be listed
   here.
 * `traits_headers`: Headers which contain the relevant `StructTraits`
   specialization(s) for any type mappings described by this file.
-* `sources`: Any implementation sources and headers needed for the
-  `StructTraits` definition. These sources are compiled directly into the
-  generated C++ bindings target for a `mojom` file applying this typemap.
+* `sources`: Any implementation sources needed for the `StructTraits`
+  definition. These sources are compiled directly into the generated C++
+  bindings target for a `mojom` file applying this typemap.
 * `public_deps`: Target dependencies exposed by the `public_headers` and
   `traits_headers`.
 * `deps`: Target dependencies exposed by `sources` but not already covered by
@@ -1601,7 +1729,7 @@ for example if you've defined in `//sample/BUILD.gn`:
 ```
 import("mojo/public/tools/bindings/mojom.gni")
 
-mojom("interfaces") {
+mojom("mojom") {
   sources = [
     "db.mojom",
   ]
@@ -1609,12 +1737,12 @@ mojom("interfaces") {
 ```
 
 Code in Blink which wishes to use the generated Blink-variant definitions must
-depend on `"//sample:interfaces_blink"`.
+depend on `"//sample:mojom_blink"`.
 
 ## Versioning Considerations
 
 For general documentation of versioning in the Mojom IDL see
-[Versioning](/mojo/public/tools/bindings/README.md#Versiwoning).
+[Versioning](/mojo/public/tools/bindings/README.md#Versioning).
 
 This section briefly discusses some C++-specific considerations relevant to
 versioned Mojom types.
@@ -1665,10 +1793,10 @@ inline bool IsKnownEnumValue(Department value);
 
 ### Using Mojo Bindings in Chrome
 
-See [Converting Legacy Chrome IPC To Mojo](/ipc/README.md).
+See [Converting Legacy Chrome IPC To Mojo](/docs/mojo_ipc_conversion.md).
 
 ### Additional Documentation
 
-[Calling Mojo From Blink](https://www.chromium.org/developers/design-documents/mojo/calling-mojo-from-blink)
-:    A brief overview of what it looks like to use Mojom C++ bindings from
-     within Blink code.
+[Calling Mojo From Blink](/docs/mojo_ipc_conversion.md#Blink_Specific-Advice):
+A brief overview of what it looks like to use Mojom C++ bindings from
+within Blink code.

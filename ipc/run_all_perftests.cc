@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/test/perf_test_suite.h"
 #include "base/test/test_io_thread.h"
+#include "build/build_config.h"
 #include "mojo/core/embedder/embedder.h"
 #include "mojo/core/embedder/scoped_ipc_support.h"
 #include "mojo/core/test/test_support_impl.h"

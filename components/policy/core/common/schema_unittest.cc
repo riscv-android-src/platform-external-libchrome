@@ -9,7 +9,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "components/policy/core/common/schema_internal.h"
@@ -28,7 +28,6 @@ const char kTestSchema[] = R"({
   "properties": {
     "Boolean": { "type": "boolean" },
     "Integer": { "type": "integer" },
-    "Null": { "type": "null" },
     "Number": { "type": "number" },
     "String": { "type": "string" },
     "Array": {
@@ -320,10 +319,6 @@ TEST(SchemaTest, ValidSchema) {
   ASSERT_TRUE(sub.valid());
   EXPECT_EQ(base::Value::Type::INTEGER, sub.type());
 
-  sub = schema.GetProperty("Null");
-  ASSERT_TRUE(sub.valid());
-  EXPECT_EQ(base::Value::Type::NONE, sub.type());
-
   sub = schema.GetProperty("Number");
   ASSERT_TRUE(sub.valid());
   EXPECT_EQ(base::Value::Type::DOUBLE, sub.type());
@@ -418,7 +413,6 @@ TEST(SchemaTest, ValidSchema) {
     { "IntegerWithEnums",             base::Value::Type::INTEGER },
     { "IntegerWithEnumsGaps",         base::Value::Type::INTEGER },
     { "IntegerWithRange",             base::Value::Type::INTEGER },
-    { "Null",                         base::Value::Type::NONE },
     { "Number",                       base::Value::Type::DOUBLE },
     { "Object",                       base::Value::Type::DICTIONARY },
     { "ObjectOfArray",                base::Value::Type::DICTIONARY },
@@ -430,7 +424,7 @@ TEST(SchemaTest, ValidSchema) {
     { "StringWithPattern",            base::Value::Type::STRING },
   };
   Schema::Iterator it = schema.GetPropertiesIterator();
-  for (size_t i = 0; i < arraysize(kExpectedProperties); ++i) {
+  for (size_t i = 0; i < base::size(kExpectedProperties); ++i) {
     ASSERT_FALSE(it.IsAtEnd());
     EXPECT_STREQ(kExpectedProperties[i].expected_key, it.key());
     ASSERT_TRUE(it.schema().valid());
@@ -450,6 +444,9 @@ TEST(SchemaTest, Lookups) {
   // This empty schema should never find named properties.
   EXPECT_FALSE(schema.GetKnownProperty("").valid());
   EXPECT_FALSE(schema.GetKnownProperty("xyz").valid());
+  EXPECT_TRUE(schema.GetRequiredProperties().empty());
+  EXPECT_TRUE(schema.GetPatternProperties("").empty());
+  EXPECT_FALSE(schema.GetAdditionalProperties().valid());
   EXPECT_TRUE(schema.GetPropertiesIterator().IsAtEnd());
 
   schema = Schema::Parse(R"({
@@ -469,7 +466,6 @@ TEST(SchemaTest, Lookups) {
   schema = Schema::Parse(R"({
     "type": "object",
     "properties": {
-      "bb" : { "type": "null" },
       "aa" : { "type": "boolean" },
       "abab" : { "type": "string" },
       "ab" : { "type": "number" },
@@ -491,9 +487,8 @@ TEST(SchemaTest, Lookups) {
     { "ab",     base::Value::Type::DOUBLE },
     { "aba",    base::Value::Type::INTEGER },
     { "abab",   base::Value::Type::STRING },
-    { "bb",     base::Value::Type::NONE },
   };
-  for (size_t i = 0; i < arraysize(kExpectedKeys); ++i) {
+  for (size_t i = 0; i < base::size(kExpectedKeys); ++i) {
     Schema sub = schema.GetKnownProperty(kExpectedKeys[i].expected_key);
     ASSERT_TRUE(sub.valid());
     EXPECT_EQ(kExpectedKeys[i].expected_type, sub.type());
@@ -590,18 +585,17 @@ TEST(SchemaTest, Wrap) {
   };
 
   const internal::SchemaData kData = {
-    kSchemas,
-    kPropertyNodes,
-    kProperties,
-    kRestriction,
-    kRequired,
-    kIntEnums,
-    kStringEnums,
+      kSchemas,  kPropertyNodes, kProperties,  kRestriction,
+      kRequired, kIntEnums,      kStringEnums,
+      -1  // validation_schema_root_index
   };
 
   Schema schema = Schema::Wrap(&kData);
   ASSERT_TRUE(schema.valid());
   EXPECT_EQ(base::Value::Type::DICTIONARY, schema.type());
+
+  // Wrapped schemas have no sensitive values.
+  EXPECT_FALSE(schema.IsSensitiveValue());
 
   struct {
     const char* key;
@@ -620,7 +614,7 @@ TEST(SchemaTest, Wrap) {
   };
 
   Schema::Iterator it = schema.GetPropertiesIterator();
-  for (size_t i = 0; i < arraysize(kExpectedProperties); ++i) {
+  for (size_t i = 0; i < base::size(kExpectedProperties); ++i) {
     ASSERT_FALSE(it.IsAtEnd());
     EXPECT_STREQ(kExpectedProperties[i].key, it.key());
     Schema sub = it.schema();
@@ -702,7 +696,6 @@ TEST(SchemaTest, Validate) {
   bundle.Clear();
   bundle.SetBoolean("Boolean", true);
   bundle.SetInteger("Integer", 123);
-  bundle.Set("Null", std::make_unique<base::Value>());
   bundle.SetDouble("Number", 3.14);
   bundle.SetString("String", "omg");
 
@@ -1239,6 +1232,163 @@ TEST(SchemaTest, ItemsReference) {
   ASSERT_EQ(base::Value::Type::BOOLEAN, items.type());
 }
 
+TEST(SchemaTest, SchemaNodeSensitiveValues) {
+  std::string error;
+
+  const std::string kNormalBooleanSchema = "normal_boolean";
+  const std::string kSensitiveBooleanSchema = "sensitive_boolean";
+  const std::string kSensitiveStringSchema = "sensitive_string";
+  const std::string kSensitiveObjectSchema = "sensitive_object";
+  const std::string kSensitiveArraySchema = "sensitive_array";
+  const std::string kSensitiveIntegerSchema = "sensitive_integer";
+  const std::string kSensitiveNumberSchema = "sensitive_number";
+  Schema schema = Schema::Parse(R"({
+    "type": "object",
+    "properties": {
+      "normal_boolean": {
+        "type": "boolean"
+      },
+      "sensitive_boolean": {
+        "type": "boolean",
+        "sensitiveValue": true
+      },
+      "sensitive_string": {
+        "type": "string",
+        "sensitiveValue": true
+      },
+      "sensitive_object": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "boolean"
+        },
+        "sensitiveValue": true
+      },
+      "sensitive_array": {
+        "type": "array",
+        "items": {
+          "type": "boolean"
+        },
+        "sensitiveValue": true
+      },
+      "sensitive_integer": {
+        "type": "integer",
+        "sensitiveValue": true
+      },
+      "sensitive_number": {
+        "type": "number",
+        "sensitiveValue": true
+      }
+    }
+  })",
+                                &error);
+  ASSERT_TRUE(schema.valid()) << error;
+  ASSERT_EQ(base::Value::Type::DICTIONARY, schema.type());
+  EXPECT_FALSE(schema.IsSensitiveValue());
+  EXPECT_TRUE(schema.HasSensitiveChildren());
+
+  Schema normal_boolean = schema.GetKnownProperty(kNormalBooleanSchema);
+  ASSERT_TRUE(normal_boolean.valid());
+  EXPECT_EQ(base::Value::Type::BOOLEAN, normal_boolean.type());
+  EXPECT_FALSE(normal_boolean.IsSensitiveValue());
+  EXPECT_FALSE(normal_boolean.HasSensitiveChildren());
+
+  Schema sensitive_boolean = schema.GetKnownProperty(kSensitiveBooleanSchema);
+  ASSERT_TRUE(sensitive_boolean.valid());
+  EXPECT_EQ(base::Value::Type::BOOLEAN, sensitive_boolean.type());
+  EXPECT_TRUE(sensitive_boolean.IsSensitiveValue());
+  EXPECT_FALSE(sensitive_boolean.HasSensitiveChildren());
+
+  Schema sensitive_string = schema.GetKnownProperty(kSensitiveStringSchema);
+  ASSERT_TRUE(sensitive_string.valid());
+  EXPECT_EQ(base::Value::Type::STRING, sensitive_string.type());
+  EXPECT_TRUE(sensitive_string.IsSensitiveValue());
+  EXPECT_FALSE(sensitive_string.HasSensitiveChildren());
+
+  Schema sensitive_object = schema.GetKnownProperty(kSensitiveObjectSchema);
+  ASSERT_TRUE(sensitive_object.valid());
+  EXPECT_EQ(base::Value::Type::DICTIONARY, sensitive_object.type());
+  EXPECT_TRUE(sensitive_object.IsSensitiveValue());
+  EXPECT_FALSE(sensitive_object.HasSensitiveChildren());
+
+  Schema sensitive_array = schema.GetKnownProperty(kSensitiveArraySchema);
+  ASSERT_TRUE(sensitive_array.valid());
+  EXPECT_EQ(base::Value::Type::LIST, sensitive_array.type());
+  EXPECT_TRUE(sensitive_array.IsSensitiveValue());
+  EXPECT_FALSE(sensitive_array.HasSensitiveChildren());
+
+  Schema sensitive_integer = schema.GetKnownProperty(kSensitiveIntegerSchema);
+  ASSERT_TRUE(sensitive_integer.valid());
+  EXPECT_EQ(base::Value::Type::INTEGER, sensitive_integer.type());
+  EXPECT_TRUE(sensitive_integer.IsSensitiveValue());
+  EXPECT_FALSE(sensitive_integer.HasSensitiveChildren());
+
+  Schema sensitive_number = schema.GetKnownProperty(kSensitiveNumberSchema);
+  ASSERT_TRUE(sensitive_number.valid());
+  EXPECT_EQ(base::Value::Type::DOUBLE, sensitive_number.type());
+  EXPECT_TRUE(sensitive_number.IsSensitiveValue());
+  EXPECT_FALSE(sensitive_number.HasSensitiveChildren());
+
+  // Run |MaskSensitiveValues| on the top-level schema
+  base::DictionaryValue object;
+  object.SetKey("objectProperty", base::Value(true));
+  base::ListValue array;
+  array.GetList().push_back(base::Value(true));
+
+  base::Value value(base::Value::Type::DICTIONARY);
+  value.SetKey(kNormalBooleanSchema, base::Value(true));
+  value.SetKey(kSensitiveBooleanSchema, base::Value(true));
+  value.SetKey(kSensitiveStringSchema, base::Value("testvalue"));
+  value.SetKey(kSensitiveObjectSchema, std::move(object));
+  value.SetKey(kSensitiveArraySchema, std::move(array));
+  value.SetKey(kSensitiveIntegerSchema, base::Value(42));
+  value.SetKey(kSensitiveNumberSchema, base::Value(3.141));
+  schema.MaskSensitiveValues(&value);
+
+  base::Value value_masked("********");
+  base::Value value_expected(base::Value::Type::DICTIONARY);
+  value_expected.SetKey(kNormalBooleanSchema, base::Value(true));
+  value_expected.SetKey(kSensitiveBooleanSchema, value_masked.Clone());
+  value_expected.SetKey(kSensitiveStringSchema, value_masked.Clone());
+  value_expected.SetKey(kSensitiveObjectSchema, value_masked.Clone());
+  value_expected.SetKey(kSensitiveArraySchema, value_masked.Clone());
+  value_expected.SetKey(kSensitiveIntegerSchema, value_masked.Clone());
+  value_expected.SetKey(kSensitiveNumberSchema, value_masked.Clone());
+  EXPECT_EQ(value_expected, value);
+
+  // Run |MaskSensitiveValues| on a sub-schema
+  base::Value string_value("testvalue");
+  sensitive_string.MaskSensitiveValues(&string_value);
+  EXPECT_EQ(value_masked.Clone(), string_value);
+}
+
+TEST(SchemaTest, SchemaNodeNoSensitiveValues) {
+  std::string error;
+  Schema schema = Schema::Parse(R"({
+    "type": "object",
+    "properties": {
+      "foo": {
+        "type": "boolean"
+      }
+    }
+  })",
+                                &error);
+  ASSERT_TRUE(schema.valid()) << error;
+  ASSERT_EQ(base::Value::Type::DICTIONARY, schema.type());
+  EXPECT_FALSE(schema.IsSensitiveValue());
+
+  Schema foo = schema.GetKnownProperty("foo");
+  ASSERT_TRUE(foo.valid());
+  EXPECT_EQ(base::Value::Type::BOOLEAN, foo.type());
+  EXPECT_FALSE(foo.IsSensitiveValue());
+
+  base::Value value(base::Value::Type::DICTIONARY);
+  value.SetKey("foo", base::Value(true));
+
+  base::Value expected_value = value.Clone();
+  schema.MaskSensitiveValues(&value);
+  EXPECT_EQ(expected_value, value);
+}
+
 TEST(SchemaTest, EnumerationRestriction) {
   // Enum attribute is a list.
   EXPECT_TRUE(ParseFails(SchemaObjectWrapper(R"({
@@ -1281,6 +1431,171 @@ TEST(SchemaTest, RangedRestriction) {
     "minimum": 10,
     "maximum": 20
   })")));
+}
+
+TEST(SchemaTest, ParseToDictAndValidate) {
+  std::string error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate("", kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate("\0", kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(
+      Schema::ParseToDictAndValidate("string", kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(
+      Schema::ParseToDictAndValidate(R"("string")", kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate("[]", kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate("{}", kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(R"({ "type": 123 })",
+                                              kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(R"({ "type": "invalid" })",
+                                              kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+        "properties": []
+      })",  // Invalid properties type.
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "string",
+        "enum": [ {} ]
+      })",  // "enum" dict values must contain "name".
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "string",
+        "enum": [ { "name": {} } ]
+      })",  // "enum" name must be a simple value.
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "array",
+        "items": [ 123 ],
+      })",  // "items" must contain a schema or schemas.
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_TRUE(Schema::ParseToDictAndValidate(
+      R"({ "type": "object" })", kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({ "type": ["object", "array"] })", kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "array",
+        "items": [
+          { "type": "string" },
+          { "type": "integer" }
+        ]
+      })",
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_TRUE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+          "properties": {
+            "string-property": {
+              "type": "string",
+              "title": "The String Policy",
+              "description": "This policy controls the String widget."
+            },
+            "integer-property": {
+              "type": "number"
+            },
+            "enum-property": {
+              "type": "integer",
+              "enum": [0, 1, 10, 100]
+            },
+            "items-property": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+        },
+        "additionalProperties": {
+          "type": "boolean"
+        }
+      })",
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_TRUE(Schema::ParseToDictAndValidate(
+      R"#({
+        "type": "object",
+        "patternProperties": {
+          ".": { "type": "boolean" },
+          "foo": { "type": "boolean" },
+          "^foo$": { "type": "boolean" },
+          "foo+": { "type": "boolean" },
+          "foo?": { "type": "boolean" },
+          "fo{2,4}": { "type": "boolean" },
+          "(left)|(right)": { "type": "boolean" }
+        }
+      })#",
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_TRUE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+        "unknown attribute": "that should just be ignored"
+      })",
+      kSchemaOptionsIgnoreUnknownAttributes, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+        "unknown attribute": "that will cause a failure"
+      })",
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+        "properties": {"foo": {"type": "number"}},
+        "required": 123
+      })",
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+        "properties": {"foo": {"type": "number"}},
+        "required": [ 123 ]
+      })",
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+        "properties": {"foo": {"type": "number"}},
+        "required": ["bar"]
+      })",
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_FALSE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+        "required": ["bar"]
+      })",
+      kSchemaOptionsNone, &error))
+      << error;
+  EXPECT_TRUE(Schema::ParseToDictAndValidate(
+      R"({
+        "type": "object",
+        "properties": {"foo": {"type": "number"}},
+        "required": ["foo"]
+      })",
+      kSchemaOptionsNone, &error))
+      << error;
 }
 
 }  // namespace policy

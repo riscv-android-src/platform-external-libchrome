@@ -37,4 +37,4 @@ for arg in "$@"; do
   esac
 done
 
-"${jni_generator}" --sources_files=<(printf "%q\n" "${files[@]}") "${args[@]}"
+"${jni_generator}" --sources-files=<(printf "%q\n" "${files[@]}") "${args[@]}"

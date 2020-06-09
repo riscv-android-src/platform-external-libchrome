@@ -16,8 +16,10 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/component_export.h"
+#include "base/containers/span.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "mojo/public/cpp/bindings/connection_group.h"
 #include "mojo/public/cpp/bindings/lib/buffer.h"
 #include "mojo/public/cpp/bindings/lib/message_internal.h"
 #include "mojo/public/cpp/bindings/lib/unserialized_message_context.h"
@@ -68,13 +70,25 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS_BASE) Message {
           size_t payload_interface_id_count,
           std::vector<ScopedHandle>* handles);
 
+  // Constructs a new serialized Message object from a fully populated message
+  // payload (including a well-formed message header) and an optional set of
+  // handle attachments. This Message may not be extended with additional
+  // payload or handles once constructed, but its payload remains mutable as
+  // long as the Message is not moved and neither |Reset()| nor
+  // |TakeMojoMessage()| is called.
+  Message(base::span<const uint8_t> payload, base::span<ScopedHandle> handles);
+
   // Constructs a new serialized Message object from an existing
   // ScopedMessageHandle; e.g., one read from a message pipe.
   //
   // If the message had any handles attached, they will be extracted and
   // retrievable via |handles()|. Such messages may NOT be sent back over
   // another message pipe, but are otherwise safe to inspect and pass around.
-  Message(ScopedMessageHandle handle);
+  //
+  // If handles are attached and their extraction fails for any reason,
+  // |*handle| remains unchanged and the returned Message will be null (i.e.
+  // calling IsNull() on it will return |true|).
+  static Message CreateFromMessageHandle(ScopedMessageHandle* message_handle);
 
   ~Message();
 
@@ -89,6 +103,11 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS_BASE) Message {
 
   // Indicates whether this Message is uninitialized.
   bool IsNull() const { return !handle_.is_valid(); }
+
+  // Indicates whether this Message is in valid state. A Message may be in an
+  // invalid state iff it failed partial deserialization during construction
+  // over a ScopedMessageHandle.
+  bool IsValid() const;
 
   // Indicates whether this Message is serialized.
   bool is_serialized() const { return serialized_; }
@@ -169,6 +188,17 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS_BASE) Message {
     return &associated_endpoint_handles_;
   }
 
+  // Sets the ConnectionGroup to which this Message's local receiver belongs, if
+  // any. This is called immediately after a Message is read from a message pipe
+  // but before it's deserialized. If non-null, |ref| must point to a Ref that
+  // outlives this Message object.
+  void set_receiver_connection_group(const ConnectionGroup::Ref* ref) {
+    receiver_connection_group_ = ref;
+  }
+  const ConnectionGroup::Ref* receiver_connection_group() const {
+    return receiver_connection_group_;
+  }
+
   // Takes ownership of any handles within |*context| and attaches them to this
   // Message.
   void AttachHandlesFromSerializationContext(
@@ -211,6 +241,11 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS_BASE) Message {
         generic_context.release()->template SafeCast<MessageType>());
   }
 
+  const char* heap_profiler_tag() const { return heap_profiler_tag_; }
+  void set_heap_profiler_tag(const char* heap_profiler_tag) {
+    heap_profiler_tag_ = heap_profiler_tag;
+  }
+
 #if defined(ENABLE_IPC_FUZZER)
   const char* interface_name() const { return interface_name_; }
   void set_interface_name(const char* interface_name) {
@@ -222,6 +257,14 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS_BASE) Message {
 #endif
 
  private:
+  // Internal constructor used by |CreateFromMessageHandle()| when either there
+  // are no attached handles or all attached handles are successfully extracted
+  // from the message object.
+  Message(ScopedMessageHandle message_handle,
+          std::vector<ScopedHandle> attached_handles,
+          internal::Buffer payload_buffer,
+          bool serialized);
+
   ScopedMessageHandle handle_;
 
   // A Buffer which may be used to allocate blocks of data within the message
@@ -240,10 +283,16 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS_BASE) Message {
   // Indicates whether this Message object is serialized.
   bool serialized_ = false;
 
+  const char* heap_profiler_tag_ = nullptr;
 #if defined(ENABLE_IPC_FUZZER)
   const char* interface_name_ = nullptr;
   const char* method_name_ = nullptr;
 #endif
+
+  // A reference to the ConnectionGroup to which the receiver of this Message
+  // belongs, if any. Only set if this Message was just read off of a message
+  // pipe and is about to be deserialized.
+  const ConnectionGroup::Ref* receiver_connection_group_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(Message);
 };
@@ -357,16 +406,6 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS_BASE) SyncMessageResponseContext {
 
   DISALLOW_COPY_AND_ASSIGN(SyncMessageResponseContext);
 };
-
-// Read a single message from the pipe. The caller should have created the
-// Message, but not called Initialize(). Returns MOJO_RESULT_SHOULD_WAIT if
-// the caller should wait on the handle to become readable. Returns
-// MOJO_RESULT_OK if the message was read successfully and should be
-// dispatched, otherwise returns an error code if something went wrong.
-//
-// NOTE: The message hasn't been validated and may be malformed!
-COMPONENT_EXPORT(MOJO_CPP_BINDINGS_BASE)
-MojoResult ReadMessage(MessagePipeHandle handle, Message* message);
 
 // Reports the currently dispatching Message as bad. Note that this is only
 // legal to call from directly within the stack frame of a message dispatch. If

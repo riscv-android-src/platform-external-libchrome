@@ -14,7 +14,7 @@
 
 #include "base/logging.h"
 #include "base/numerics/safe_math.h"
-#include "base/scoped_clear_errno.h"
+#include "base/scoped_clear_last_error.h"
 #include "base/strings/utf_string_conversions.h"
 
 namespace base {
@@ -432,6 +432,9 @@ bool StringToSizeT(StringPiece16 input, size_t* output) {
 }
 
 bool StringToDouble(const std::string& input, double* output) {
+  // Thread-safe?  It is on at least Mac, Linux, and Windows.
+  internal::ScopedClearLastError clear_errno;
+
   char* endptr = nullptr;
   *output = strtod(input.c_str(), &endptr);
 

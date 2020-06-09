@@ -9,8 +9,8 @@
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/test/test_support_android.h"
-#include "jni/ValidationTestUtil_jni.h"
 #include "mojo/public/cpp/bindings/tests/validation_test_input_parser.h"
+#include "mojo/public/java/system/jni_headers/ValidationTestUtil_jni.h"
 
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
@@ -20,7 +20,6 @@ namespace android {
 
 ScopedJavaLocalRef<jobject> JNI_ValidationTestUtil_ParseData(
     JNIEnv* env,
-    const JavaParamRef<jclass>& jcaller,
     const JavaParamRef<jstring>& data_as_string) {
   std::string input =
       base::android::ConvertJavaStringToUTF8(env, data_as_string);

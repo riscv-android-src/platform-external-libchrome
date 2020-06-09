@@ -39,7 +39,6 @@ class MessagePumpLibeventTest : public testing::Test {
   void SetUp() override {
     Thread::Options options(MessageLoop::TYPE_IO, 0);
     ASSERT_TRUE(io_thread_.StartWithOptions(options));
-    ASSERT_EQ(MessageLoop::TYPE_IO, io_thread_.message_loop()->type());
     int ret = pipe(pipefds_);
     ASSERT_EQ(0, ret);
   }
@@ -156,8 +155,8 @@ TEST_F(MessagePumpLibeventTest, StopWatcher) {
   OnLibeventNotification(pump.get(), &watcher);
 }
 
-void QuitMessageLoopAndStart(const Closure& quit_closure) {
-  quit_closure.Run();
+void QuitMessageLoopAndStart(OnceClosure quit_closure) {
+  std::move(quit_closure).Run();
 
   RunLoop runloop(RunLoop::Type::kNestableTasksAllowed);
   ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, runloop.QuitClosure());
@@ -197,18 +196,19 @@ void FatalClosure() {
 class QuitWatcher : public BaseWatcher {
  public:
   QuitWatcher(MessagePumpLibevent::FdWatchController* controller,
-              base::Closure quit_closure)
+              base::OnceClosure quit_closure)
       : BaseWatcher(controller), quit_closure_(std::move(quit_closure)) {}
 
   void OnFileCanReadWithoutBlocking(int /* fd */) override {
     // Post a fatal closure to the MessageLoop before we quit it.
     ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, BindOnce(&FatalClosure));
 
-    quit_closure_.Run();
+    if (quit_closure_)
+      std::move(quit_closure_).Run();
   }
 
  private:
-  base::Closure quit_closure_;
+  base::OnceClosure quit_closure_;
 };
 
 void WriteFDWrapper(const int fd,

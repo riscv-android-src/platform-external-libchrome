@@ -35,11 +35,3 @@ TEST(BuildTime, InThePast) {
   EXPECT_LT(base::GetBuildTime(), base::Time::Now());
   EXPECT_LT(base::GetBuildTime(), base::Time::NowFromSystemTime());
 }
-
-#if !defined(DONT_EMBED_BUILD_METADATA)
-TEST(BuildTime, NotTooFar) {
-  // BuildTime must be less than 45 days old.
-  base::Time cutoff(base::Time::Now() - base::TimeDelta::FromDays(45));
-  EXPECT_GT(base::GetBuildTime(), cutoff);
-}
-#endif

@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/no_destructor.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_local.h"
 // Unsupported in libchrome.
@@ -26,6 +27,8 @@ ThreadLocalStorage::Slot& GetThreadNameTLS() {
   return *thread_name_tls;
 }
 }
+
+ThreadIdNameManager::Observer::~Observer() = default;
 
 ThreadIdNameManager::ThreadIdNameManager()
     : main_process_name_(nullptr), main_process_id_(kInvalidThreadId) {
@@ -54,9 +57,16 @@ void ThreadIdNameManager::RegisterThread(PlatformThreadHandle::Handle handle,
       name_to_interned_name_[kDefaultName];
 }
 
-void ThreadIdNameManager::InstallSetNameCallback(SetNameCallback callback) {
+void ThreadIdNameManager::AddObserver(Observer* obs) {
   AutoLock locked(lock_);
-  set_name_callback_ = std::move(callback);
+  DCHECK(!base::Contains(observers_, obs));
+  observers_.push_back(obs);
+}
+
+void ThreadIdNameManager::RemoveObserver(Observer* obs) {
+  AutoLock locked(lock_);
+  DCHECK(base::Contains(observers_, obs));
+  base::Erase(observers_, obs);
 }
 
 void ThreadIdNameManager::SetName(const std::string& name) {
@@ -64,7 +74,7 @@ void ThreadIdNameManager::SetName(const std::string& name) {
   std::string* leaked_str = nullptr;
   {
     AutoLock locked(lock_);
-    NameToInternedNameMap::iterator iter = name_to_interned_name_.find(name);
+    auto iter = name_to_interned_name_.find(name);
     if (iter != name_to_interned_name_.end()) {
       leaked_str = iter->second;
     } else {
@@ -72,13 +82,11 @@ void ThreadIdNameManager::SetName(const std::string& name) {
       name_to_interned_name_[name] = leaked_str;
     }
 
-    ThreadIdToHandleMap::iterator id_to_handle_iter =
-        thread_id_to_handle_.find(id);
+    auto id_to_handle_iter = thread_id_to_handle_.find(id);
 
     GetThreadNameTLS().Set(const_cast<char*>(leaked_str->c_str()));
-    if (set_name_callback_) {
-      set_name_callback_.Run(leaked_str->c_str());
-    }
+    for (Observer* obs : observers_)
+      obs->OnThreadNameChanged(leaked_str->c_str());
 
     // The main thread of a process will not be created as a Thread object which
     // means there is no PlatformThreadHandler registered.
@@ -106,12 +114,11 @@ const char* ThreadIdNameManager::GetName(PlatformThreadId id) {
   if (id == main_process_id_)
     return main_process_name_->c_str();
 
-  ThreadIdToHandleMap::iterator id_to_handle_iter =
-      thread_id_to_handle_.find(id);
+  auto id_to_handle_iter = thread_id_to_handle_.find(id);
   if (id_to_handle_iter == thread_id_to_handle_.end())
     return name_to_interned_name_[kDefaultName]->c_str();
 
-  ThreadHandleToInternedNameMap::iterator handle_to_name_iter =
+  auto handle_to_name_iter =
       thread_handle_to_interned_name_.find(id_to_handle_iter->second);
   return handle_to_name_iter->second->c_str();
 }
@@ -124,14 +131,12 @@ const char* ThreadIdNameManager::GetNameForCurrentThread() {
 void ThreadIdNameManager::RemoveName(PlatformThreadHandle::Handle handle,
                                      PlatformThreadId id) {
   AutoLock locked(lock_);
-  ThreadHandleToInternedNameMap::iterator handle_to_name_iter =
-      thread_handle_to_interned_name_.find(handle);
+  auto handle_to_name_iter = thread_handle_to_interned_name_.find(handle);
 
   DCHECK(handle_to_name_iter != thread_handle_to_interned_name_.end());
   thread_handle_to_interned_name_.erase(handle_to_name_iter);
 
-  ThreadIdToHandleMap::iterator id_to_handle_iter =
-      thread_id_to_handle_.find(id);
+  auto id_to_handle_iter = thread_id_to_handle_.find(id);
   DCHECK((id_to_handle_iter!= thread_id_to_handle_.end()));
   // The given |id| may have been re-used by the system. Make sure the
   // mapping points to the provided |handle| before removal.
