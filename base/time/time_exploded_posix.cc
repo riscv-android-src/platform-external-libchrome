@@ -200,7 +200,8 @@ void Time::Explode(bool is_local, Exploded* exploded) const {
   // Time stores times with microsecond resolution, but Exploded only carries
   // millisecond resolution, so begin by being lossy.  Adjust from Windows
   // epoch (1601) to Unix epoch (1970);
-  int64_t microseconds = us_ - kTimeTToMicrosecondsOffset;
+  // int64_t microseconds = us_ - kTimeTToMicrosecondsOffset;
+  int64_t microseconds = base::ClampSub(us_, kTimeTToMicrosecondsOffset);
   // The following values are all rounded towards -infinity.
   int64_t milliseconds;  // Milliseconds since epoch.
   SysTime seconds;       // Seconds since epoch.
