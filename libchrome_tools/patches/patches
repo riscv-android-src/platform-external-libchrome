@@ -1,10 +1,6 @@
 # This file will be used by emerge in libchrome-XXXX.ebuild to determine the
 # order of applying patches.
 
-# For backward compatibility.
-# TODO(crbug.com/909719): Remove this patch after clients are updated.
-libchrome-Add-EmptyResponseCallback-for-backward-com.patch
-
 # Undo gn_helper sys.path update.
 libchrome-Unpatch-sys.path-update.patch
 
