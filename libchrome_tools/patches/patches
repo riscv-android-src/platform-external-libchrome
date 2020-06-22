@@ -33,9 +33,6 @@ Add-header-files-base-check_op-notreached-h.patch
 # Remove after r758621
 un-internalize-ScopedClearLastError.patch
 
-# Backward compatibility for uprev from r576279 to r679961.
-backward-compatibility.patch
-
 # Solve name conflict with abseil in absl package, when a program in Chromium
 # OS depends on both abseil and libchrome.
 absl-thread-annotation-conflict.patch

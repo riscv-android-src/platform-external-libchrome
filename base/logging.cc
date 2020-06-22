@@ -497,7 +497,8 @@ bool ShouldLogToStderr(int severity) {
   if (g_logging_destination & LOG_TO_STDERR)
     return true;
   if (severity >= kAlwaysPrintErrorLevel)
-    return (g_logging_destination & ~LOG_TO_FILE) == LOG_NONE;
+    return true;
+    // return (g_logging_destination & ~LOG_TO_FILE) == LOG_NONE;
   return false;
 }
 
