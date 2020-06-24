@@ -1,0 +1,13 @@
+diff --git a/dbus/bus.h b/dbus/bus.h
+index b082110e5..50de3bbc4 100644
+--- a/dbus/bus.h
++++ b/dbus/bus.h
+@@ -233,6 +233,8 @@ class CHROME_DBUS_EXPORT Bus : public base::RefCountedThreadSafe<Bus> {
+   typedef base::Callback<void (const std::string& service_owner)>
+       GetServiceOwnerCallback;
+ 
++  using ServiceOwnerChangeCallback = GetServiceOwnerCallback;
++
+   // TODO(satorux): Remove the service name parameter as the caller of
+   // RequestOwnership() knows the service name.
+ 

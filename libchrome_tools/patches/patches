@@ -39,3 +39,6 @@ backward-compatibility.patch
 # Solve name conflict with abseil in absl package, when a program in Chromium
 # OS depends on both abseil and libchrome.
 absl-thread-annotation-conflict.patch
+
+# Forward compatibility patch to r78xxxx
+forward-compatibility-dbus.patch
