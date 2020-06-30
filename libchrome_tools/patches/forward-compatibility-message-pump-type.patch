@@ -1,0 +1,233 @@
+From 26bf78672bee448eae84e6ee1ef8722dedb5717c Mon Sep 17 00:00:00 2001
+From: Carlos Caballero <carlscab@google.com>
+Date: Tue, 30 Jul 2019 21:27:27 +0900
+Subject: [PATCH] Move MessagePump::Type to its own type and file
+
+MessagePumpType is used in other places (eg base/thread.h). Moving it to
+its own file will simplify include dependencies.
+
+Bug: 891670
+Change-Id: I214342da0d6833e0ad324cd4d58c08a0233f7c1b
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/1718806
+Commit-Queue: Carlos Caballero <carlscab@google.com>
+Reviewed-by: Gabriel Charette <gab@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#682235}
+
+
+CrOS-Libchrome-Original-Commit: d70e603abfca58566c20337a9c4ee1c3daac5ecd
+---
+ base/message_loop/message_loop.h      |  3 +-
+ base/message_loop/message_pump.cc     | 16 ++++-----
+ base/message_loop/message_pump.h      | 46 +++---------------------
+ base/message_loop/message_pump_type.h | 52 +++++++++++++++++++++++++++
+ 4 files changed, 66 insertions(+), 51 deletions(-)
+ create mode 100644 base/message_loop/message_pump_type.h
+
+diff --git a/base/message_loop/message_loop.h b/base/message_loop/message_loop.h
+index d0bbe64a8..63113907a 100644
+--- a/base/message_loop/message_loop.h
++++ b/base/message_loop/message_loop.h
+@@ -14,7 +14,7 @@
+ #include "base/macros.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/message_loop/message_loop_current.h"
+-#include "base/message_loop/message_pump.h"
++#include "base/message_loop/message_pump_type.h"
+ #include "base/message_loop/timer_slack.h"
+ #include "base/pending_task.h"
+ #include "base/run_loop.h"
+@@ -34,6 +34,7 @@ class MessageLoopTaskEnvironment;
+ }  // namespace internal
+ 
+ class MessageLoopImpl;
++class MessagePump;
+ 
+ namespace sequence_manager {
+ class TaskQueue;
+diff --git a/base/message_loop/message_pump.cc b/base/message_loop/message_pump.cc
+index a3e119e5e..877ba35cc 100644
+--- a/base/message_loop/message_pump.cc
++++ b/base/message_loop/message_pump.cc
+@@ -39,9 +39,9 @@ bool MessagePump::IsMessagePumpForUIFactoryOveridden() {
+ }
+ 
+ // static
+-std::unique_ptr<MessagePump> MessagePump::Create(Type type) {
++std::unique_ptr<MessagePump> MessagePump::Create(MessagePumpType type) {
+   switch (type) {
+-    case Type::UI:
++    case MessagePumpType::UI:
+       if (message_pump_for_ui_factory_)
+         return message_pump_for_ui_factory_();
+ #if defined(OS_IOS) || defined(OS_MACOSX)
+@@ -55,32 +55,32 @@ std::unique_ptr<MessagePump> MessagePump::Create(Type type) {
+       return std::make_unique<MessagePumpForUI>();
+ #endif
+ 
+-    case Type::IO:
++    case MessagePumpType::IO:
+       return std::make_unique<MessagePumpForIO>();
+ 
+ #if defined(OS_ANDROID)
+-    case Type::JAVA:
++    case MessagePumpType::JAVA:
+       return std::make_unique<MessagePumpForUI>();
+ #endif
+ 
+ #if defined(OS_MACOSX)
+-    case Type::NS_RUNLOOP:
++    case MessagePumpType::NS_RUNLOOP:
+       return std::make_unique<MessagePumpNSRunLoop>();
+ #endif
+ 
+ #if defined(OS_WIN)
+-    case Type::UI_WITH_WM_QUIT_SUPPORT: {
++    case MessagePumpType::UI_WITH_WM_QUIT_SUPPORT: {
+       auto pump = std::make_unique<MessagePumpForUI>();
+       pump->EnableWmQuit();
+       return pump;
+     }
+ #endif  // defined(OS_WIN)
+ 
+-    case Type::CUSTOM:
++    case MessagePumpType::CUSTOM:
+       NOTREACHED();
+       return nullptr;
+ 
+-    case Type::DEFAULT:
++    case MessagePumpType::DEFAULT:
+ #if defined(OS_IOS)
+       // On iOS, a native runloop is always required to pump system work.
+       return std::make_unique<MessagePumpCFRunLoop>();
+diff --git a/base/message_loop/message_pump.h b/base/message_loop/message_pump.h
+index 082c75d94..db1c77e19 100644
+--- a/base/message_loop/message_pump.h
++++ b/base/message_loop/message_pump.h
+@@ -7,6 +7,7 @@
+ 
+ #include "base/base_export.h"
+ #include "base/logging.h"
++#include "base/message_loop/message_pump_type.h"
+ #include "base/message_loop/timer_slack.h"
+ #include "base/sequence_checker.h"
+ #include "base/time/time.h"
+@@ -18,47 +19,8 @@ class TimeTicks;
+ 
+ class BASE_EXPORT MessagePump {
+  public:
+-  // A MessagePump has a particular type, which indicates the set of
+-  // asynchronous events it may process in addition to tasks and timers.
+-  //
+-  // TYPE_DEFAULT
+-  //   This type of pump only supports tasks and timers.
+-  //
+-  // TYPE_UI
+-  //   This type of pump also supports native UI events (e.g., Windows
+-  //   messages).
+-  //
+-  // TYPE_IO
+-  //   This type of pump also supports asynchronous IO.
+-  //
+-  // TYPE_JAVA
+-  //   This type of pump is backed by a Java message handler which is
+-  //   responsible for running the tasks added to the ML. This is only for use
+-  //   on Android. TYPE_JAVA behaves in essence like TYPE_UI, except during
+-  //   construction where it does not use the main thread specific pump factory.
+-  //
+-  // TYPE_NS_RUNLOOP
+-  //   This type of pump is backed by a NSRunLoop. This is only for use on
+-  //   OSX and IOS.
+-  //
+-  // UI_WITH_WM_QUIT_SUPPORT
+-  //   This type of pump supports WM_QUIT messages in addition to other native
+-  //   UI events. This is only for use on windows.
+-  enum class Type {
+-    DEFAULT,
+-    UI,
+-    CUSTOM,
+-    IO,
+-#if defined(OS_ANDROID)
+-    JAVA,
+-#endif  // defined(OS_ANDROID)
+-#if defined(OS_MACOSX)
+-    NS_RUNLOOP,
+-#endif  // defined(OS_MACOSX)
+-#if defined(OS_WIN)
+-    UI_WITH_WM_QUIT_SUPPORT,
+-#endif  // defined(OS_WIN)
+-  };
++  // DEPRECATED: Use MessagePumpType instead.
++  using Type = MessagePumpType;
+ 
+   using MessagePumpFactory = std::unique_ptr<MessagePump>();
+   // Uses the given base::MessagePumpFactory to override the default MessagePump
+@@ -69,7 +31,7 @@ class BASE_EXPORT MessagePump {
+   static bool IsMessagePumpForUIFactoryOveridden();
+ 
+   // Creates the default MessagePump based on |type|. Caller owns return value.
+-  static std::unique_ptr<MessagePump> Create(Type type);
++  static std::unique_ptr<MessagePump> Create(MessagePumpType type);
+ 
+   // Please see the comments above the Run method for an illustration of how
+   // these delegate methods are used.
+diff --git a/base/message_loop/message_pump_type.h b/base/message_loop/message_pump_type.h
+new file mode 100644
+index 000000000..41db0104e
+--- /dev/null
++++ b/base/message_loop/message_pump_type.h
+@@ -0,0 +1,52 @@
++// Copyright 2019 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_MESSAGE_LOOP_MESSAGE_PUMP_TYPE_H_
++#define BASE_MESSAGE_LOOP_MESSAGE_PUMP_TYPE_H_
++
++#include "build/build_config.h"
++
++namespace base {
++
++// A MessagePump has a particular type, which indicates the set of
++// asynchronous events it may process in addition to tasks and timers.
++
++enum class MessagePumpType {
++  // This type of pump only supports tasks and timers.
++  DEFAULT,
++
++  // This type of pump also supports native UI events (e.g., Windows
++  // messages).
++  UI,
++
++  // User provided implementation of MessagePump interface
++  CUSTOM,
++
++  // This type of pump also supports asynchronous IO.
++  IO,
++
++#if defined(OS_ANDROID)
++  // This type of pump is backed by a Java message handler which is
++  // responsible for running the tasks added to the ML. This is only for use
++  // on Android. TYPE_JAVA behaves in essence like TYPE_UI, except during
++  // construction where it does not use the main thread specific pump factory.
++  JAVA,
++#endif  // defined(OS_ANDROID)
++
++#if defined(OS_MACOSX)
++  // This type of pump is backed by a NSRunLoop. This is only for use on
++  // OSX and IOS.
++  NS_RUNLOOP,
++#endif  // defined(OS_MACOSX)
++
++#if defined(OS_WIN)
++  // This type of pump supports WM_QUIT messages in addition to other native
++  // UI events. This is only for use on windows.
++  UI_WITH_WM_QUIT_SUPPORT,
++#endif  // defined(OS_WIN)
++};
++
++}  // namespace base
++
++#endif  // BASE_MESSAGE_LOOP_MESSAGE_PUMP_TYPE_H_
+-- 
+2.27.0.212.ge8ba1cc988-goog
+
