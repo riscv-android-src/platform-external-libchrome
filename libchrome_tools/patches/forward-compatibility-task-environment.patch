@@ -1,0 +1,20 @@
+diff --git a/base/test/task_environment.h b/base/test/task_environment.h
+new file mode 100644
+index 000000000000..1d7a19d5d6c2
+--- /dev/null
++++ base/test/task_environment.h
+@@ -0,0 +1,14 @@
++#ifndef BASE_TEST_TASK_ENVIRONMENT_H_
++#define BASE_TEST_TASK_ENVIRONMENT_H_
++
++#include <base/test/scoped_task_environment.h>
++
++namespace base {
++namespace test {
++
++using TaskEnvironment = ScopedTaskEnvironment;
++
++}
++}
++
++#endif // BASE_TEST_TASK_ENVIRONMENT_H_
