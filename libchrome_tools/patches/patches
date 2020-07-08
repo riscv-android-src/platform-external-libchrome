@@ -44,3 +44,7 @@ forward-compatibility-task-environment.patch
 
 # Remove after uprev to r780000
 py3.patch
+
+# crbug/813112. Remove after uprev to r780000
+0001-Reland-Mojo-Introduce-async-invitation-client-transp.patch
+0002-mojo-Support-clients-rejoining-a-process-network.patch
