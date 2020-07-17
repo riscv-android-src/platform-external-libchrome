@@ -57,6 +57,22 @@ config("base_core_config") {
   ]
 }
 
+config("base_export_config") {
+  defines = [ "COMPONENT_BUILD", "BASE_IMPLEMENTATION" ]
+}
+
+config("crypto_export_config") {
+  defines = [ "COMPONENT_BUILD", "CRYPTO_IMPLEMENTATION" ]
+}
+
+config("dbus_export_config") {
+  defines = [ "COMPONENT_BUILD", "DBUS_IMPLEMENTATION" ]
+}
+
+config("policy_export_config") {
+  defines = [ "COMPONENT_BUILD", "POLICY_COMPONENT_IMPLEMENTATION" ]
+}
+
 libbase_sublibs = [
   {
     name = "base-core"
@@ -70,7 +86,7 @@ libbase_sublibs = [
       "glib-2.0",
       "libevent",
     ]
-    configs = [ ":base_core_config" ]
+    configs = [ ":base_core_config", ":base_export_config" ]
     sources = [
       "base/allocator/allocator_extension.cc",
       "base/at_exit.cc",
@@ -336,6 +352,7 @@ libbase_sublibs = [
     output_name = name + "-${libbase_ver}"
     deps = [ ":base-core" ]
     libs = [ "dl" ]
+    configs = [ ":base_export_config" ]
     sources = [
       "base/allocator/allocator_shim.cc",
       "base/allocator/allocator_shim_default_dispatch_to_glibc.cc",
@@ -350,6 +367,7 @@ libbase_sublibs = [
     output_name = name + "-${libbase_ver}"
     deps = [ ":base-core" ]
     libs = [ "re2" ]
+    configs = [ ":policy_export_config" ]
     sources = [
       "components/policy/core/common/json_schema_constants.cc",
       "components/policy/core/common/policy_load_status.cc",
@@ -387,10 +405,12 @@ if (use.crypto) {
         ":base-core",
         ":base-dl",
       ]
+      libs = [ "dl" ]
       pkg_deps = [
         "nss",
         "openssl",
       ]
+      configs = [ ":crypto_export_config" ]
       sources = [
         "crypto/hmac.cc",
         "crypto/hmac_nss.cc",
@@ -431,6 +451,7 @@ if (use.dbus) {
       } else {
         pkg_deps += [ "protobuf-lite" ]
       }
+      configs = [ ":dbus_export_config" ]
       sources = [
         "dbus/bus.cc",
         "dbus/dbus_statistics.cc",
@@ -473,6 +494,7 @@ if (use.timers) {
       name = "base-timers"
       output_name = name + "-${libbase_ver}"
       deps = [ ":base-core" ]
+      configs = [ "//common-mk:visibility_default" ]
       sources = [ "components/timers/alarm_timer_chromeos.cc" ]
     },
 
@@ -515,7 +537,6 @@ foreach(attr, libbase_sublibs) {
     }
     configs += [
       ":libchrome_config",
-      "//common-mk:visibility_default",
     ]
     if (buildtype == "static_library") {
       configs -= [ "//common-mk:use_thin_archive" ]
