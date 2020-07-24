@@ -49,6 +49,7 @@ _TOOL_ARCH_MAP = {
   'x86_64': ('x86_64-4.9', 'x86_64-linux-android'),
   'x64': ('x86_64-4.9', 'x86_64-linux-android'),
   'mips': ('mipsel-linux-android-4.9', 'mipsel-linux-android'),
+  'riscv64': ('riscv64-linux-android-8.1', 'riscv64-linux-android'),
 }
 
 # Cache used to speed up the results of ToolPath()
