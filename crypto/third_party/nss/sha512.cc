@@ -182,7 +182,7 @@ static void
 SHA256_Compress(SHA256Context *ctx)
 {
   {
-    register PRUint32 t1, t2;
+    PRUint32 t1, t2;
 
 #if defined(IS_LITTLE_ENDIAN)
     BYTESWAP4(W[0]);
