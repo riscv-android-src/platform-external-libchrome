@@ -48,3 +48,6 @@ py3.patch
 # crbug/813112. Remove after uprev to r780000
 0001-Reland-Mojo-Introduce-async-invitation-client-transp.patch
 0002-mojo-Support-clients-rejoining-a-process-network.patch
+
+# Remove after uprev to r755425
+dont_use_deprecated_allocate_overload_in_base_StackContainer.patch

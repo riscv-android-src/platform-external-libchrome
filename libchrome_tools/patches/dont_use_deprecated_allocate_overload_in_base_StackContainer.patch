@@ -1,0 +1,48 @@
+From 16b569f8654da890ec6ad051d2b0a0b5cc55ddd0 Mon Sep 17 00:00:00 2001
+From: Daniel Cheng <dcheng@chromium.org>
+Date: Wed, 01 Apr 2020 17:56:34 +0000
+Subject: [PATCH] Don't use deprecated std::allocator<T>::allocate() overload in base::StackContainer
+
+`allocate()` with a hint is deprecated in C++17 and removed in C++20.
+Note that while `allocate(size_t)` isn't provided prior to C++17,
+`allocate(size_t, void* = nullptr)` is and will behave equivalently.
+
+Bug: 752720
+Fixed: 1065435
+Change-Id: I27a7a22a752e8304988f44d9a2e330a6b2b97db5
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/2131045
+Reviewed-by: Tiancong Wang <tcwang@google.com>
+Reviewed-by: George Burgess <gbiv@chromium.org>
+Commit-Queue: Daniel Cheng <dcheng@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#755425}
+---
+
+diff --git a/base/containers/stack_container.h b/base/containers/stack_container.h
+index c9b285c..46ced5b 100644
+--- a/base/containers/stack_container.h
++++ b/base/containers/stack_container.h
+@@ -102,20 +102,19 @@
+   // Actually do the allocation. Use the stack buffer if nobody has used it yet
+   // and the size requested fits. Otherwise, fall through to the standard
+   // allocator.
+-  pointer allocate(size_type n, void* hint = 0) {
+-    if (source_ != NULL && !source_->used_stack_buffer_
+-        && n <= stack_capacity) {
++  pointer allocate(size_type n) {
++    if (source_ && !source_->used_stack_buffer_ && n <= stack_capacity) {
+       source_->used_stack_buffer_ = true;
+       return source_->stack_buffer();
+     } else {
+-      return std::allocator<T>::allocate(n, hint);
++      return std::allocator<T>::allocate(n);
+     }
+   }
+ 
+   // Free: when trying to free the stack buffer, just mark it as free. For
+   // non-stack-buffer pointers, just fall though to the standard allocator.
+   void deallocate(pointer p, size_type n) {
+-    if (source_ != NULL && p == source_->stack_buffer())
++    if (source_ && p == source_->stack_buffer())
+       source_->used_stack_buffer_ = false;
+     else
+       std::allocator<T>::deallocate(p, n);
