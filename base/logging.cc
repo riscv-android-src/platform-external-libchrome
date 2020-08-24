@@ -822,10 +822,13 @@ LogMessage::~LogMessage() {
 #if 0 // This is for building Chromium browser on Android.
     const char kAndroidLogTag[] = "chromium";
 #else
-    char* kAndroidLogTag = base::CommandLine::InitializedForCurrentProcess() ?
-        base::CommandLine::ForCurrentProcess()->
-            GetProgram().BaseName().value().c_str() :
-        nullptr;
+    char* kAndroidLogTag = nullptr;
+    string androidLogTag;
+    if (base::CommandLine::InitializedForCurrentProcess()) {
+        androidLogTag = base::CommandLine::ForCurrentProcess()->
+                GetProgram().BaseName().value();
+        kAndroidLogTag = androidLogTag.c_str();
+    }
 #endif
 #if DCHECK_IS_ON()
     // Split the output by new lines to prevent the Android system from
