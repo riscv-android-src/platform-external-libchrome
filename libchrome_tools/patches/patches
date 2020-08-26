@@ -46,6 +46,9 @@ android-allow-null-exception-reporter.patch
 # Remove after uprev to r798795
 mojo-core-io-runner-subclass.patch
 
+# Remove after uprev to r810524
+0001-Allow-ChromeOS-to-use-syslog-format-for-LogMessages.patch
+
 # Remove after uprev to r811858
 forward-compatibility-base-value.patch
 

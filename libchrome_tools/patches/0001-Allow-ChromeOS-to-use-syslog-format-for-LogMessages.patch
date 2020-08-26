@@ -1,0 +1,651 @@
+From 56ef135420ab4464a77915df003d123645302d75 Mon Sep 17 00:00:00 2001
+From: Yuta Hijikata <ythjkt@chromium.org>
+Date: Wed, 26 Aug 2020 16:10:54 +0000
+Subject: [PATCH] Allow ChromeOS to use syslog format for LogMessages.
+
+This patch for libchrome combines changes from 3 CLs in chromium.
+crrev.com/c/2260255
+Merge conflict on base/logging.cc was resolved by keeping lock_impl.h instead
+of lock.h. Also the change to base/BUILD.gn was removed from the original
+crrev.com/c/2377669
+crrev.com/c/2417738
+Merge conflict was resolved by keeping the change minimal by using the change
+from HEAD and only moving the relevant three lines.
+
+Below are the messages from each CLs.
+
+As part of an effort to unify logs in Chrome OS, this adds option to
+enable syslog-compatible log format for chrome for chromeos.
+
+e.g. 2020-06-27T23:55:25.094701Z ERROR chrome[3816:3877]: [drm_device_handle.cc(90)] Succeeded authenticating /dev/dri/card0 in 0 ms with 1 attempt(s)
+
+For more detail http://go/cros-syslog-format-log-chrome.
+
+Related patches:
+crrev.com/c/2311981 Update tast test.
+
+BUG: 1093033
+TEST: base_unittests
+
+Cq-Depend: chromium:2326511
+Change-Id: I55053807d9291dce3b09d3d2e780501fa9383938
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/2260255
+Commit-Queue: Yuta Hijikata <ythjkt@chromium.org>
+Reviewed-by: Wez <wez@chromium.org>
+Reviewed-by: Yoshiki Iguchi <yoshiki@chromium.org>
+Reviewed-by: Steven Bennetts <stevenjb@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#801811}
+
+Switch ChromeOS syslog format log.
+
+This patch flips the default log format of chrome for chrome os to
+syslog format.
+
+For more detail go/cros-syslog-format-log-chrome.
+
+BUG: 1093033
+TEST: base_unittests
+Change-Id: Ic5f40d1769439960c1d49799c1f201ce69110f31
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/2377669
+Commit-Queue: Yuta Hijikata <ythjkt@chromium.org>
+Reviewed-by: Wez <wez@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#803370}
+
+Fixes the timing to set log_format
+
+g_log_format has to be set within BaseInitLoggingImpl regardless of the log target.
+
+BUG: None
+TEST: base_unittests
+Change-Id: I4690d537600eb0eb7e88e897435cf014e013e251
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/2417738
+Commit-Queue: Yuta Hijikata <ythjkt@chromium.org>
+Reviewed-by: Wez <wez@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#810523}
+---
+ BUILD.gn                            |   1 +
+ base/logging.cc                     | 143 ++++++++++++++++++----------
+ base/logging.h                      |  26 ++++-
+ base/logging_chromeos.cc            |  90 +++++++++++++++++
+ base/logging_unittest.cc            | 115 ++++++++++++++++------
+ base/test/scoped_logging_settings.h |  41 ++++++++
+ 6 files changed, 338 insertions(+), 78 deletions(-)
+ create mode 100644 base/logging_chromeos.cc
+ create mode 100644 base/test/scoped_logging_settings.h
+
+diff --git a/BUILD.gn b/BUILD.gn
+index eed55ee14..a846d8f52 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -151,6 +151,7 @@ libbase_sublibs = [
+       "base/lazy_instance_helpers.cc",
+       "base/location.cc",
+       "base/logging.cc",
++      "base/logging_chromeos.cc",
+       "base/memory/aligned_memory.cc",
+       "base/memory/platform_shared_memory_region.cc",
+       "base/memory/platform_shared_memory_region_posix.cc",
+diff --git a/base/logging.cc b/base/logging.cc
+index 4ed404c55..41976c6a3 100644
+--- a/base/logging.cc
++++ b/base/logging.cc
+@@ -115,6 +115,7 @@ typedef pthread_mutex_t* MutexHandle;
+ #include "base/strings/sys_string_conversions.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/synchronization/lock_impl.h"
++#include "base/test/scoped_logging_settings.h"
+ #include "base/threading/platform_thread.h"
+ #include "base/vlog.h"
+ 
+@@ -153,6 +154,11 @@ int g_min_log_level = 0;
+ // LoggingDestination values joined by bitwise OR.
+ int g_logging_destination = LOG_DEFAULT;
+ 
++#if defined(OS_CHROMEOS)
++// Specifies the format of log header for chrome os.
++LogFormat g_log_format = LogFormat::LOG_FORMAT_SYSLOG;
++#endif
++
+ // For LOG_ERROR and above, always print to stderr.
+ const int kAlwaysPrintErrorLevel = LOG_ERROR;
+ 
+@@ -416,6 +422,9 @@ bool BaseInitLoggingImpl(const LoggingSettings& settings) {
+   CHECK_EQ(settings.logging_dest & ~(LOG_TO_SYSTEM_DEBUG_LOG | LOG_TO_STDERR),
+            0u);
+ #endif
++#if defined(OS_CHROMEOS)
++  g_log_format = settings.log_format;
++#endif
+ 
+   if (base::CommandLine::InitializedForCurrentProcess()) {
+     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+@@ -957,60 +966,66 @@ void LogMessage::Init(const char* file, int line) {
+   // Stores the base name as the null-terminated suffix substring of |filename|.
+   file_basename_ = filename.data();
+ 
+-  // TODO(darin): It might be nice if the columns were fixed width.
+-
+-  stream_ <<  '[';
+-  if (g_log_prefix)
+-    stream_ << g_log_prefix << ':';
+-  if (g_log_process_id)
+-    stream_ << base::GetUniqueIdForProcess() << ':';
+-  if (g_log_thread_id)
+-    stream_ << base::PlatformThread::CurrentId() << ':';
+-  if (g_log_timestamp) {
++#if defined(OS_CHROMEOS)
++  if (g_log_format == LogFormat::LOG_FORMAT_SYSLOG) {
++    InitWithSyslogPrefix(
++        filename, line, TickCount(), log_severity_name(severity_), g_log_prefix,
++        g_log_process_id, g_log_thread_id, g_log_timestamp, g_log_tickcount);
++  } else
++#endif  // defined(OS_CHROMEOS)
++  {
++    // TODO(darin): It might be nice if the columns were fixed width.
++    stream_ << '[';
++    if (g_log_prefix)
++      stream_ << g_log_prefix << ':';
++    if (g_log_process_id)
++      stream_ << base::GetUniqueIdForProcess() << ':';
++    if (g_log_thread_id)
++      stream_ << base::PlatformThread::CurrentId() << ':';
++    if (g_log_timestamp) {
+ #if defined(OS_WIN)
+-    SYSTEMTIME local_time;
+-    GetLocalTime(&local_time);
+-    stream_ << std::setfill('0')
+-            << std::setw(2) << local_time.wMonth
+-            << std::setw(2) << local_time.wDay
+-            << '/'
+-            << std::setw(2) << local_time.wHour
+-            << std::setw(2) << local_time.wMinute
+-            << std::setw(2) << local_time.wSecond
+-            << '.'
+-            << std::setw(3)
+-            << local_time.wMilliseconds
+-            << ':';
++      SYSTEMTIME local_time;
++      GetLocalTime(&local_time);
++      stream_ << std::setfill('0')
++              << std::setw(2) << local_time.wMonth
++              << std::setw(2) << local_time.wDay
++              << '/'
++              << std::setw(2) << local_time.wHour
++              << std::setw(2) << local_time.wMinute
++              << std::setw(2) << local_time.wSecond
++              << '.'
++              << std::setw(3) << local_time.wMilliseconds
++              << ':';
+ #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+-    timeval tv;
+-    gettimeofday(&tv, nullptr);
+-    time_t t = tv.tv_sec;
+-    struct tm local_time;
+-    localtime_r(&t, &local_time);
+-    struct tm* tm_time = &local_time;
+-    stream_ << std::setfill('0')
+-            << std::setw(2) << 1 + tm_time->tm_mon
+-            << std::setw(2) << tm_time->tm_mday
+-            << '/'
+-            << std::setw(2) << tm_time->tm_hour
+-            << std::setw(2) << tm_time->tm_min
+-            << std::setw(2) << tm_time->tm_sec
+-            << '.'
+-            << std::setw(6) << tv.tv_usec
+-            << ':';
++      timeval tv;
++      gettimeofday(&tv, nullptr);
++      time_t t = tv.tv_sec;
++      struct tm local_time;
++      localtime_r(&t, &local_time);
++      struct tm* tm_time = &local_time;
++      stream_ << std::setfill('0')
++              << std::setw(2) << 1 + tm_time->tm_mon
++              << std::setw(2) << tm_time->tm_mday
++              << '/'
++              << std::setw(2) << tm_time->tm_hour
++              << std::setw(2) << tm_time->tm_min
++              << std::setw(2) << tm_time->tm_sec
++              << '.'
++              << std::setw(6) << tv.tv_usec
++              << ':';
+ #else
+ #error Unsupported platform
+ #endif
++    }
++    if (g_log_tickcount)
++      stream_ << TickCount() << ':';
++    if (severity_ >= 0) {
++      stream_ << log_severity_name(severity_);
++    } else {
++      stream_ << "VERBOSE" << -severity_;
++    }
++    stream_ << ":" << filename << "(" << line << ")] ";
+   }
+-  if (g_log_tickcount)
+-    stream_ << TickCount() << ':';
+-  if (severity_ >= 0)
+-    stream_ << log_severity_name(severity_);
+-  else
+-    stream_ << "VERBOSE" << -severity_;
+-
+-  stream_ << ":" << filename << "(" << line << ")] ";
+-
+   message_start_ = stream_.str().length();
+ }
+ 
+@@ -1106,6 +1121,38 @@ FILE* DuplicateLogFILE() {
+ }
+ #endif
+ 
++// Used for testing. Declared in test/scoped_logging_settings.h.
++ScopedLoggingSettings::ScopedLoggingSettings()
++    : enable_process_id_(g_log_process_id),
++      enable_thread_id_(g_log_thread_id),
++      enable_timestamp_(g_log_timestamp),
++      enable_tickcount_(g_log_tickcount),
++      min_log_level_(GetMinLogLevel()),
++      message_handler_(GetLogMessageHandler()) {
++#if defined(OS_CHROMEOS)
++  log_format_ = g_log_format;
++#endif  // defined(OS_CHROMEOS)
++}
++
++ScopedLoggingSettings::~ScopedLoggingSettings() {
++  g_log_process_id = enable_process_id_;
++  g_log_thread_id = enable_thread_id_;
++  g_log_timestamp = enable_timestamp_;
++  g_log_tickcount = enable_tickcount_;
++  SetMinLogLevel(min_log_level_);
++  SetLogMessageHandler(message_handler_);
++
++#if defined(OS_CHROMEOS)
++  g_log_format = log_format_;
++#endif  // defined(OS_CHROMEOS)
++}
++
++#if defined(OS_CHROMEOS)
++void ScopedLoggingSettings::SetLogFormat(LogFormat log_format) const {
++  g_log_format = log_format;
++}
++#endif  // defined(OS_CHROMEOS)
++
+ void RawLog(int level, const char* message) {
+   if (level >= g_min_log_level && message) {
+     size_t bytes_written = 0;
+diff --git a/base/logging.h b/base/logging.h
+index 4bc8b00ef..cb1b49921 100644
+--- a/base/logging.h
++++ b/base/logging.h
+@@ -145,7 +145,7 @@
+ // There is the special severity of DFATAL, which logs FATAL in debug mode,
+ // ERROR in normal mode.
+ //
+-// Output is of the format, for example:
++// Output is formatted as per the following example, except on Chrome OS.
+ // [3816:3877:0812/234555.406952:VERBOSE1:drm_device_handle.cc(90)] Succeeded
+ // authenticating /dev/dri/card0 in 0 ms with 1 attempt(s)
+ //
+@@ -157,6 +157,9 @@
+ // 4. The log level
+ // 5. The filename and line number where the log was instantiated
+ //
++// Output for Chrome OS can be switched to syslog-like format. See
++// InitWithSyslogPrefix() in logging_chromeos.h for details.
++//
+ // Note that the visibility can be changed by setting preferences in
+ // SetLogItems()
+ 
+@@ -209,6 +212,13 @@ enum LogLockingState { LOCK_LOG_FILE, DONT_LOCK_LOG_FILE };
+ // Defaults to APPEND_TO_OLD_LOG_FILE.
+ enum OldFileDeletionState { DELETE_OLD_LOG_FILE, APPEND_TO_OLD_LOG_FILE };
+ 
++#if defined(OS_CHROMEOS)
++// Defines the log message prefix format to use.
++// LOG_FORMAT_SYSLOG indicates syslog-like message prefixes.
++// LOG_FORMAT_CHROME indicates the normal Chrome format.
++enum class BASE_EXPORT LogFormat { LOG_FORMAT_CHROME, LOG_FORMAT_SYSLOG };
++#endif
++
+ struct BASE_EXPORT LoggingSettings {
+   // Equivalent to logging destination enum, but allows for multiple
+   // destinations.
+@@ -225,6 +235,8 @@ struct BASE_EXPORT LoggingSettings {
+   // of the FILE. If there's an error writing to this file, no fallback paths
+   // will be opened.
+   FILE* log_file = nullptr;
++  // ChromeOS uses the syslog log format by default.
++  LogFormat log_format = LogFormat::LOG_FORMAT_SYSLOG;
+ #endif
+ };
+ 
+@@ -588,6 +600,18 @@ class BASE_EXPORT LogMessage {
+   // will have lost the thread error value when the log call returns.
+   base::ScopedClearLastError last_error_;
+ 
++#if defined(OS_CHROMEOS)
++  void InitWithSyslogPrefix(base::StringPiece filename,
++                            int line,
++                            uint64_t tick_count,
++                            const char* log_severity_name_c_str,
++                            const char* log_prefix,
++                            bool enable_process_id,
++                            bool enable_thread_id,
++                            bool enable_timestamp,
++                            bool enable_tickcount);
++#endif
++
+   DISALLOW_COPY_AND_ASSIGN(LogMessage);
+ };
+ 
+diff --git a/base/logging_chromeos.cc b/base/logging_chromeos.cc
+new file mode 100644
+index 000000000..a6a26d6ff
+--- /dev/null
++++ b/base/logging_chromeos.cc
+@@ -0,0 +1,90 @@
++// Copyright 2020 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Define _GNU_SOURCE to ensure that <errno.h> defines
++// program_invocation_short_name which is used in GetProgramName(). Keep this at
++// the top of the file since some system headers might include <errno.h> and the
++// header could be skipped on subsequent includes.
++#if !defined(_GNU_SOURCE)
++#define _GNU_SOURCE
++#endif
++
++#include "base/logging.h"
++
++#include <errno.h>
++
++#include <iomanip>
++
++#include "base/process/process_handle.h"
++#include "base/strings/string_piece.h"
++#include "base/threading/platform_thread.h"
++
++namespace logging {
++
++namespace {
++const char* GetProgramName() {
++  return program_invocation_short_name ? program_invocation_short_name : "";
++}
++}  // namespace
++
++// InitWithSyslogPrefix generates log header for Chrome OS in syslog compatible
++// format. The timezone will always be UTC regardless of devices' timezone.
++// `<rfc3339_timestamp> <tickcount> <log_level>`
++// `<program_name>[<pid>:<thread_id>]: `
++// `[<filename>(<line_number>)] <message>`
++//
++// e.g.
++// 2020-06-27T23:55:25.094701Z 1234 VERBOSE1 chrome[3816:3877]:
++// [drm_device_handle.cc(90)] Succeeded authenticating /dev/dri/card0 in 0 ms
++// with 1 attempt(s)
++void LogMessage::InitWithSyslogPrefix(base::StringPiece filename,
++                                      int line,
++                                      uint64_t tick_count,
++                                      const char* log_severity_name_c_str,
++                                      const char* log_prefix,
++                                      bool enable_process_id,
++                                      bool enable_thread_id,
++                                      bool enable_timestamp,
++                                      bool enable_tickcount) {
++  if (log_prefix)
++    stream_ << log_prefix << ':';
++  if (enable_timestamp) {
++    timeval tv{};
++    gettimeofday(&tv, nullptr);
++    time_t t = tv.tv_sec;
++    struct tm utc_time {};
++    gmtime_r(&t, &utc_time);
++    stream_ << std::setfill('0')                               // Set fill to 0
++            << std::setw(4) << 1900 + utc_time.tm_year << "-"  // year
++            << std::setw(2) << 1 + utc_time.tm_mon << "-"      // month
++            << std::setw(2) << utc_time.tm_mday                // date
++            << 'T' << std::setw(2) << utc_time.tm_hour << ":"  // hour
++            << std::setw(2) << utc_time.tm_min << ":"          // minute
++            << std::setw(2) << utc_time.tm_sec << "."          // second
++            << std::setw(6) << tv.tv_usec                      // millisecond
++            << "Z ";                                           // timezone UTC
++  }
++  if (enable_tickcount)
++    stream_ << tick_count << ' ';
++  if (severity_ >= 0) {
++    stream_ << log_severity_name_c_str;
++  } else {
++    stream_ << "VERBOSE" << -severity_;
++  }
++  stream_ << ' ' << GetProgramName();
++  if (enable_process_id || enable_thread_id) {
++    stream_ << "[";
++    if (enable_process_id) {
++      stream_ << base::GetUniqueIdForProcess();
++    }
++    if (enable_thread_id) {
++      stream_ << ':' << base::PlatformThread::CurrentId();
++    }
++    stream_ << "]";
++  }
++  stream_ << ": ";
++  stream_ << "[" << filename << "(" << line << ")] ";
++}
++
++}  // namespace logging
+diff --git a/base/logging_unittest.cc b/base/logging_unittest.cc
+index c14f35196..0451154ec 100644
+--- a/base/logging_unittest.cc
++++ b/base/logging_unittest.cc
+@@ -11,11 +11,13 @@
+ #include "base/files/scoped_temp_dir.h"
+ #include "base/logging.h"
+ #include "base/macros.h"
++#include "base/no_destructor.h"
+ #include "base/run_loop.h"
+ #include "base/sanitizer_buildflags.h"
+ #include "base/strings/string_piece.h"
+ #include "base/test/bind_test_util.h"
+ #include "base/test/scoped_feature_list.h"
++#include "base/test/scoped_logging_settings.h"
+ #include "base/test/task_environment.h"
+ #include "build/build_config.h"
+ 
+@@ -64,27 +66,16 @@ namespace {
+ using ::testing::Return;
+ using ::testing::_;
+ 
+-// Class to make sure any manipulations we do to the min log level are
+-// contained (i.e., do not affect other unit tests).
+-class LogStateSaver {
+- public:
+-  LogStateSaver() : old_min_log_level_(GetMinLogLevel()) {}
+-
+-  ~LogStateSaver() {
+-    SetMinLogLevel(old_min_log_level_);
++class LoggingTest : public testing::Test {
++ protected:
++  const ScopedLoggingSettings& scoped_logging_settings() {
++    return scoped_logging_settings_;
+   }
+ 
+- private:
+-  int old_min_log_level_;
+-
+-  DISALLOW_COPY_AND_ASSIGN(LogStateSaver);
+-};
+-
+-class LoggingTest : public testing::Test {
+  private:
+   base::test::SingleThreadTaskEnvironment task_environment_{
+       base::test::SingleThreadTaskEnvironment::MainThreadType::IO};
+-  LogStateSaver log_state_saver_;
++  ScopedLoggingSettings scoped_logging_settings_;
+ };
+ 
+ class MockLogSource {
+@@ -818,34 +809,100 @@ TEST_F(LoggingTest, FuchsiaLogging) {
+ #endif  // defined(OS_FUCHSIA)
+ 
+ TEST_F(LoggingTest, LogPrefix) {
+-  // Set up a callback function to capture the log output string.
+-  auto old_log_message_handler = GetLogMessageHandler();
+   // Use a static because only captureless lambdas can be converted to a
+   // function pointer for SetLogMessageHandler().
+-  static std::string* log_string_ptr = nullptr;
+-  std::string log_string;
+-  log_string_ptr = &log_string;
++  static base::NoDestructor<std::string> log_string;
+   SetLogMessageHandler([](int severity, const char* file, int line,
+                           size_t start, const std::string& str) -> bool {
+-    *log_string_ptr = str;
++    *log_string = str;
+     return true;
+   });
+ 
+-  // Logging with a prefix includes the prefix string after the opening '['.
++  // Logging with a prefix includes the prefix string.
+   const char kPrefix[] = "prefix";
+   SetLogPrefix(kPrefix);
+   LOG(ERROR) << "test";  // Writes into |log_string|.
+-  EXPECT_EQ(1u, log_string.find(kPrefix));
+-
++  EXPECT_NE(std::string::npos, log_string->find(kPrefix));
+   // Logging without a prefix does not include the prefix string.
+   SetLogPrefix(nullptr);
+   LOG(ERROR) << "test";  // Writes into |log_string|.
+-  EXPECT_EQ(std::string::npos, log_string.find(kPrefix));
++  EXPECT_EQ(std::string::npos, log_string->find(kPrefix));
++}
++
++#if defined(OS_CHROMEOS)
++TEST_F(LoggingTest, LogCrosSyslogFormat) {
++  // Set log format to syslog format.
++  scoped_logging_settings().SetLogFormat(LogFormat::LOG_FORMAT_SYSLOG);
++
++  const char* kTimestampPattern = R"(\d\d\d\d\-\d\d\-\d\d)"             // date
++                                  R"(T\d\d\:\d\d\:\d\d\.\d\d\d\d\d\d)"  // time
++                                  R"(Z.+\n)";  // timezone
++
++  // Use a static because only captureless lambdas can be converted to a
++  // function pointer for SetLogMessageHandler().
++  static base::NoDestructor<std::string> log_string;
++  SetLogMessageHandler([](int severity, const char* file, int line,
++                          size_t start, const std::string& str) -> bool {
++    *log_string = str;
++    return true;
++  });
++
++  {
++    // All flags are true.
++    SetLogItems(true, true, true, true);
++    const char* kExpected =
++        R"(\S+ \d+ ERROR \S+\[\d+:\d+\]\: \[\S+\] message\n)";
++
++    LOG(ERROR) << "message";
+ 
+-  // Clean up.
+-  SetLogMessageHandler(old_log_message_handler);
+-  log_string_ptr = nullptr;
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kTimestampPattern));
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kExpected));
++  }
++
++  {
++    // Timestamp is true.
++    SetLogItems(false, false, true, false);
++    const char* kExpected = R"(\S+ ERROR \S+\: \[\S+\] message\n)";
++
++    LOG(ERROR) << "message";
++
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kTimestampPattern));
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kExpected));
++  }
++
++  {
++    // PID and timestamp are true.
++    SetLogItems(true, false, true, false);
++    const char* kExpected = R"(\S+ ERROR \S+\[\d+\]: \[\S+\] message\n)";
++
++    LOG(ERROR) << "message";
++
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kTimestampPattern));
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kExpected));
++  }
++
++  {
++    // ThreadID and timestamp are true.
++    SetLogItems(false, true, true, false);
++    const char* kExpected = R"(\S+ ERROR \S+\[:\d+\]: \[\S+\] message\n)";
++
++    LOG(ERROR) << "message";
++
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kTimestampPattern));
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kExpected));
++  }
++
++  {
++    // All flags are false.
++    SetLogItems(false, false, false, false);
++    const char* kExpected = R"(ERROR \S+: \[\S+\] message\n)";
++
++    LOG(ERROR) << "message";
++
++    EXPECT_THAT(*log_string, ::testing::MatchesRegex(kExpected));
++  }
+ }
++#endif  // defined(OS_CHROMEOS)
+ 
+ #if !defined(ADDRESS_SANITIZER) && !defined(MEMORY_SANITIZER) && \
+     !BUILDFLAG(IS_HWASAN)
+diff --git a/base/test/scoped_logging_settings.h b/base/test/scoped_logging_settings.h
+new file mode 100644
+index 000000000..08e06e22c
+--- /dev/null
++++ b/base/test/scoped_logging_settings.h
+@@ -0,0 +1,41 @@
++// Copyright 2020 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_TEST_SCOPED_LOGGING_SETTINGS_H_
++#define BASE_TEST_SCOPED_LOGGING_SETTINGS_H_
++
++#include "base/logging.h"
++
++namespace logging {
++// Saves the current logging settings and restores them when destroyed.
++// This is used by logging tests to avoid affecting later tests that
++// may run afterward, in the same process.
++// Note that the log_file setting is not currently saved/restored.
++class BASE_EXPORT ScopedLoggingSettings {
++ public:
++  ScopedLoggingSettings();
++  ~ScopedLoggingSettings();
++
++  ScopedLoggingSettings(const ScopedLoggingSettings&) = delete;
++  ScopedLoggingSettings& operator=(const ScopedLoggingSettings&) = delete;
++
++#if defined(OS_CHROMEOS)
++  void SetLogFormat(LogFormat) const;
++#endif
++
++ private:
++  bool enable_process_id_;
++  bool enable_thread_id_;
++  bool enable_timestamp_;
++  bool enable_tickcount_;
++  int min_log_level_;
++  LogMessageHandlerFunction message_handler_;
++
++#if defined(OS_CHROMEOS)
++  LogFormat log_format_;
++#endif  // defined(OS_CHROMEOS)
++};
++}  // namespace logging
++
++#endif  // BASE_TEST_SCOPED_LOGGING_SETTINGS_H_
+-- 
+2.29.2
+
