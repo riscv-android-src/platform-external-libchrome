@@ -41,6 +41,7 @@ absl-thread-annotation-conflict.patch
 forward-compatibility-dbus.patch
 forward-compatibility-message-pump-type.patch
 forward-compatibility-task-environment.patch
+forward-compatibility-values.patch
 
 # Remove after uprev to r780000
 py3.patch
