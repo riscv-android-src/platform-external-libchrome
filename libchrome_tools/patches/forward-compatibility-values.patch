@@ -1,19 +1,19 @@
-From 1e26ed3cf2c2ac48b4c421a46a7cb628a55fa00a Mon Sep 17 00:00:00 2001
+From 820df360842483e376a1d9c54a23fc944b6dd976 Mon Sep 17 00:00:00 2001
 From: hscham <hscham@chromium.org>
 Date: Wed, 9 Sep 2020 10:01:33 +0900
-Subject: [PATCH] Support base::Value::{TakeList,Append}
+Subject: [PATCH] Support base::Value::{TakeList,Append,EraseListIter}
 
 Change-Id: Ide84c1bb8bb0a47c828cf0c1b3082e26f6de82f5
 ---
- base/values.cc | 5 +++++
- base/values.h  | 3 +++
- 2 files changed, 8 insertions(+)
+ base/values.cc | 14 ++++++++++++++
+ base/values.h  |  8 ++++++++
+ 2 files changed, 22 insertions(+)
 
 diff --git a/base/values.cc b/base/values.cc
-index 6509f3df2d..7606a36811 100644
+index 6509f3df2d..8f44c957d3 100644
 --- a/base/values.cc
 +++ b/base/values.cc
-@@ -336,6 +336,11 @@ const Value::ListStorage& Value::GetList() const {
+@@ -336,6 +336,20 @@ const Value::ListStorage& Value::GetList() const {
    return list_;
  }
  
@@ -22,20 +22,33 @@ index 6509f3df2d..7606a36811 100644
 +  GetList().push_back(std::move(value));
 +}
 +
++bool Value::EraseListIter(ListStorage::const_iterator iter) {
++  CHECK(is_list());
++  if (iter == list_.end())
++    return false;
++
++  list_.erase(iter);
++  return true;
++}
++
  Value* Value::FindKey(StringPiece key) {
    return const_cast<Value*>(static_cast<const Value*>(this)->FindKey(key));
  }
-diff --git a/base/values.h b/base/values.h
-index a3b87baaf8..14569a5a0d 100644
+index a3b87baaf8..9d6331a084 100644
 --- a/base/values.h
 +++ b/base/values.h
-@@ -176,6 +176,9 @@ class BASE_EXPORT Value {
+@@ -176,6 +176,14 @@ class BASE_EXPORT Value {
  
    ListStorage& GetList();
    const ListStorage& GetList() const;
 +  inline ListStorage TakeList() { return std::move(GetList()); }
 +
 +  void Append(Value&& value);
++
++  // Erases the Value pointed to by |iter|. Returns false if |iter| is out of
++  // bounds.
++  // Note: This CHECKs that type() is Type::LIST.
++  bool EraseListIter(ListStorage::const_iterator iter);
  
    // |FindKey| looks up |key| in the underlying dictionary. If found, it returns
    // a pointer to the element. Otherwise it returns nullptr.
