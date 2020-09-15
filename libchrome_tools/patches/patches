@@ -52,3 +52,6 @@ py3.patch
 
 # Remove after uprev to r755425
 dont_use_deprecated_allocate_overload_in_base_StackContainer.patch
+
+# Remove after uprev to r807076
+0001-Fix-pending_broker_clients-handling.patch
