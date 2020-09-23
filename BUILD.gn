@@ -335,6 +335,7 @@ libbase_sublibs = [
       "base/time/time_now_posix.cc",
       "base/time/time_override.cc",
       "base/timer/elapsed_timer.cc",
+      "base/timer/lap_timer.cc",
       "base/timer/timer.cc",
       "base/token.cc",
       "base/trace_event/traced_value.cc",
