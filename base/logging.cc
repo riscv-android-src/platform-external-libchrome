@@ -803,8 +803,8 @@ LogMessage::~LogMessage() {
 #if 0 // This is for building Chromium browser on Android.
     const char kAndroidLogTag[] = "chromium";
 #else
-    char* kAndroidLogTag = nullptr;
-    string androidLogTag;
+    const char* kAndroidLogTag = nullptr;
+    std::string androidLogTag;
     if (base::CommandLine::InitializedForCurrentProcess()) {
         androidLogTag = base::CommandLine::ForCurrentProcess()->
                 GetProgram().BaseName().value();
