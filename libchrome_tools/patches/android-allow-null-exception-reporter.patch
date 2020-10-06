@@ -1,0 +1,41 @@
+From d5d663f8c8032527eceb929b99be046fad45729d Mon Sep 17 00:00:00 2001
+From: Garfield Tan <xutan@google.com>
+Date: Tue, 15 Sep 2020 01:30:56 +0000
+Subject: [PATCH] Allow null exception reporter.
+
+libchrome in ARC++ runs without a java exception reporter. Logcat will
+dump the information after an exception happens.
+
+Bug: b:164205917
+Test: build.
+Change-Id: Id07dda246b8e63b52033cb961245281caa898b48
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/2407252
+Commit-Queue: Garfield Tan <xutan@chromium.org>
+Reviewed-by: Hidehiko Abe <hidehiko@chromium.org>
+Reviewed-by: Andrew Grieve <agrieve@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#806816}
+---
+ base/android/java_exception_reporter.cc | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/base/android/java_exception_reporter.cc b/base/android/java_exception_reporter.cc
+index 6859003c413a..fa3a72ae7f90 100644
+--- a/base/android/java_exception_reporter.cc
++++ b/base/android/java_exception_reporter.cc
+@@ -61,8 +61,11 @@ void SetJavaExceptionCallback(void (*callback)(const char*)) {
+ }
+ 
+ void SetJavaException(const char* exception) {
+-  DCHECK(g_java_exception_callback);
+-  g_java_exception_callback(exception);
++  // No need to print exception because they are already logged via
++  // env->ExceptionDescribe() within jni_android.cc.
++  if (g_java_exception_callback) {
++    g_java_exception_callback(exception);
++  }
+ }
+ 
+ void JNI_JavaExceptionReporter_ReportJavaException(
+-- 
+2.28.0.806.g8561365e88-goog
+
