@@ -890,7 +890,7 @@ if (use.mojo) {
     version = "${libbase_ver}"
     libs = [ "-lmojo-${libbase_ver}" ]
     cflags = [
-      "-I/usr/lib/base-${libbase_ver}",
+      "-I/usr/include/base-${libbase_ver}",
       "-Wno-cast-qual",
       "-Wno-cast-align",
     ]
