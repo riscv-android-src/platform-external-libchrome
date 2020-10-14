@@ -1,0 +1,89 @@
+diff --git a/base/check.h b/base/check.h
+index 086846d33a84..6e646932a8e1 100644
+--- a/base/check.h
++++ b/base/check.h
+@@ -43,7 +43,7 @@ namespace logging {
+ class VoidifyStream {
+  public:
+   VoidifyStream() = default;
+-  explicit VoidifyStream(bool ignored) {}
++  explicit VoidifyStream(bool) {}
+ 
+   // This operator has lower precedence than << but higher than ?:
+   void operator&(std::ostream&) {}
+diff --git a/base/check_op.cc b/base/check_op.cc
+index 4f887fc57875..167408d3f572 100644
+--- a/base/check_op.cc
++++ b/base/check_op.cc
+@@ -8,7 +8,7 @@
+ // build time. Try not to raise this limit unless absolutely necessary. See
+ // https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
+ #ifndef NACL_TC_REV
+-#pragma clang max_tokens_here 244000
++// #pragma clang max_tokens_here 244000
+ #endif
+ 
+ #include <string.h>
+diff --git a/base/logging.cc b/base/logging.cc
+index 2fa5e6de44e6..e011dc49ecb7 100644
+--- a/base/logging.cc
++++ b/base/logging.cc
+@@ -8,7 +8,7 @@
+ // build time. Try not to raise this limit unless absolutely necessary. See
+ // https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
+ #ifndef NACL_TC_REV
+-#pragma clang max_tokens_here 370000
++// #pragma clang max_tokens_here 370000
+ #endif  // NACL_TC_REV
+ 
+ #include <limits.h>
+diff --git a/base/message_loop/message_loop.h b/base/message_loop/message_loop.h
+new file mode 100644
+index 000000000000..cfdbdd1da2ee
+--- /dev/null
++++ b/base/message_loop/message_loop.h
+@@ -0,0 +1,32 @@
++#ifndef BASE_MESSAGE_LOOP_MESSAGE_LOOP_H_
++#define BASE_MESSAGE_LOOP_MESSAGE_LOOP_H_
++
++#include "base/message_loop/message_loop_current.h"
++#include "base/task/single_thread_task_executor.h"
++
++namespace base {
++
++
++class MessageLoop : public SingleThreadTaskExecutor {
++ public:
++   using Type = MessagePumpType;
++
++   static constexpr Type TYPE_DEFAULT = Type::DEFAULT;
++   static constexpr Type TYPE_UI = Type::UI;
++   static constexpr Type TYPE_CUSTOM = Type::CUSTOM;
++   static constexpr Type TYPE_IO = Type::IO;
++#if defined(OS_ANDROID)
++   static constexpr Type TYPE_JAVA = Type::JAVA;
++#endif  // defined(OS_ANDROID)
++
++  explicit MessageLoop(Type type = Type::DEFAULT) : SingleThreadTaskExecutor(type) {}
++};
++
++class MessageLoopForIO : public MessageLoop {
++ public:
++  MessageLoopForIO() : MessageLoop(MessagePumpType::IO) {}
++};
++
++}
++
++#endif // BASE_MESSAGE_LOOP_MESSAGE_LOOP_H_
+diff --git a/base/threading/thread.h b/base/threading/thread.h
+index f19f328916ad..8b0a171ed9bb 100644
+--- a/base/threading/thread.h
++++ b/base/threading/thread.h
+@@ -13,6 +13,7 @@
+ #include "base/base_export.h"
+ #include "base/callback.h"
+ #include "base/macros.h"
++#include "base/message_loop/message_loop.h"
+ #include "base/message_loop/message_pump_type.h"
+ #include "base/message_loop/timer_slack.h"
+ #include "base/sequence_checker.h"

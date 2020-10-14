@@ -6,15 +6,15 @@
 
 #include <algorithm>
 
+#include "base/check_op.h"
 #include "base/containers/stack_container.h"
-#include "base/logging.h"
 
 namespace mojo {
 
 SyncEventWatcher::SyncEventWatcher(base::WaitableEvent* event,
-                                   const base::Closure& callback)
+                                   base::RepeatingClosure callback)
     : event_(event),
-      callback_(callback),
+      callback_(std::move(callback)),
       registry_(SyncHandleRegistry::current()),
       destroyed_(new base::RefCountedData<bool>(false)) {}
 

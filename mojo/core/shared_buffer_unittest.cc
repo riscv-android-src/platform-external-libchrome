@@ -7,8 +7,7 @@
 #include <string>
 #include <utility>
 
-#include "base/logging.h"
-#include "base/memory/shared_memory.h"
+#include "base/memory/platform_shared_memory_region.h"
 #include "base/strings/string_piece.h"
 #include "build/build_config.h"
 #include "mojo/core/core.h"

@@ -80,7 +80,7 @@ TestHarness::TestHarness()
                                 POLICY_SOURCE_PLATFORM),
       next_policy_file_index_(100) {}
 
-TestHarness::~TestHarness() {}
+TestHarness::~TestHarness() = default;
 
 void TestHarness::SetUp() {
   ASSERT_TRUE(test_dir_.CreateUniqueTempDir());
@@ -190,9 +190,8 @@ class ConfigDirPolicyLoaderTest : public PolicyTestBase {
 // The preferences dictionary is expected to be empty when there are no files to
 // load.
 TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsEmpty) {
-  ConfigDirPolicyLoader loader(
-      scoped_task_environment_.GetMainThreadTaskRunner(), harness_.test_dir(),
-      POLICY_SCOPE_MACHINE);
+  ConfigDirPolicyLoader loader(task_environment_.GetMainThreadTaskRunner(),
+                               harness_.test_dir(), POLICY_SCOPE_MACHINE);
   std::unique_ptr<PolicyBundle> bundle(loader.Load());
   ASSERT_TRUE(bundle.get());
   const PolicyBundle kEmptyBundle;
@@ -204,9 +203,8 @@ TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsEmpty) {
 TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsNonExistentDirectory) {
   base::FilePath non_existent_dir(
       harness_.test_dir().Append(FILE_PATH_LITERAL("not_there")));
-  ConfigDirPolicyLoader loader(
-      scoped_task_environment_.GetMainThreadTaskRunner(), non_existent_dir,
-      POLICY_SCOPE_MACHINE);
+  ConfigDirPolicyLoader loader(task_environment_.GetMainThreadTaskRunner(),
+                               non_existent_dir, POLICY_SCOPE_MACHINE);
   std::unique_ptr<PolicyBundle> bundle(loader.Load());
   ASSERT_TRUE(bundle.get());
   const PolicyBundle kEmptyBundle;
@@ -230,9 +228,8 @@ TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsMergePrefs) {
   for (unsigned int i = 5; i <= 8; ++i)
     harness_.WriteConfigFile(test_dict_bar, base::NumberToString(i));
 
-  ConfigDirPolicyLoader loader(
-      scoped_task_environment_.GetMainThreadTaskRunner(), harness_.test_dir(),
-      POLICY_SCOPE_USER);
+  ConfigDirPolicyLoader loader(task_environment_.GetMainThreadTaskRunner(),
+                               harness_.test_dir(), POLICY_SCOPE_USER);
   std::unique_ptr<PolicyBundle> bundle(loader.Load());
   ASSERT_TRUE(bundle.get());
   PolicyBundle expected_bundle;
@@ -246,10 +243,10 @@ TEST_F(ConfigDirPolicyLoaderTest, ReadPrefsMergePrefs) {
             .Get(kHomepageLocation)
             ->DeepCopy();
     conflict_policy.conflicts.clear();
-    conflict_policy.value = std::make_unique<base::Value>("http://bar.com");
+    conflict_policy.set_value(base::Value("http://bar.com"));
     expected_bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .GetMutable(kHomepageLocation)
-        ->AddConflictingPolicy(conflict_policy);
+        ->AddConflictingPolicy(std::move(conflict_policy));
     expected_bundle.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .GetMutable(kHomepageLocation)
         ->AddWarning(IDS_POLICY_CONFLICT_DIFF_VALUE);

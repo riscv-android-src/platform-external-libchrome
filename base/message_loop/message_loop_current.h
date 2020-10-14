@@ -18,15 +18,12 @@
 #include "build/build_config.h"
 
 namespace web {
-class TestWebThreadBundle;
+class WebTaskEnvironment;
 }
 
 namespace base {
 
-class MessageLoopImpl;
-
 namespace sequence_manager {
-
 namespace internal {
 class SequenceManagerImpl;
 }
@@ -110,10 +107,6 @@ class BASE_EXPORT MessageLoopCurrent {
   // instance should replace its TaskRunner.
   void SetTaskRunner(scoped_refptr<SingleThreadTaskRunner> task_runner);
 
-  // This alias is deprecated. Use base::TaskObserver instead.
-  // TODO(yutak): Replace all the use sites with base::TaskObserver.
-  using TaskObserver = base::TaskObserver;
-
   // Forwards to MessageLoop::(Add|Remove)TaskObserver.
   // DEPRECATED(https://crbug.com/825327): only owners of the MessageLoop
   // instance should add task observers on it.
@@ -124,48 +117,45 @@ class BASE_EXPORT MessageLoopCurrent {
   // posted tasks.
   void SetAddQueueTimeToTasks(bool enable);
 
-  // Enables or disables the recursive task processing. This happens in the case
-  // of recursive message loops. Some unwanted message loops may occur when
-  // using common controls or printer functions. By default, recursive task
-  // processing is disabled.
+  // Enables nested task processing in scope of an upcoming native message loop.
+  // Some unwanted message loops may occur when using common controls or printer
+  // functions. Hence, nested task processing is disabled by default to avoid
+  // unplanned reentrancy. This re-enables it in cases where the stack is
+  // reentrancy safe and processing nestable tasks is explicitly safe.
   //
-  // Please use |ScopedNestableTaskAllower| instead of calling these methods
-  // directly.  In general, nestable message loops are to be avoided.  They are
-  // dangerous and difficult to get right, so please use with extreme caution.
-  //
-  // The specific case where tasks get queued is:
-  // - The thread is running a message loop.
+  // For instance,
+  // - The current thread is running a message loop.
   // - It receives a task #1 and executes it.
-  // - The task #1 implicitly starts a message loop, like a MessageBox in the
-  //   unit test. This can also be StartDoc or GetSaveFileName.
+  // - The task #1 implicitly starts a nested message loop, like a MessageBox in
+  //   the unit test. This can also be StartDoc or GetSaveFileName.
   // - The thread receives a task #2 before or while in this second message
   //   loop.
   // - With NestableTasksAllowed set to true, the task #2 will run right away.
   //   Otherwise, it will get executed right after task #1 completes at "thread
   //   message loop level".
   //
-  // DEPRECATED(https://crbug.com/750779): Use RunLoop::Type on the relevant
-  // RunLoop instead of these methods.
-  // TODO(gab): Migrate usage and delete these methods.
-  void SetNestableTasksAllowed(bool allowed);
-  bool NestableTasksAllowed() const;
-
-  // Enables nestable tasks on the current MessageLoop while in scope.
-  // DEPRECATED(https://crbug.com/750779): This should not be used when the
-  // nested loop is driven by RunLoop (use RunLoop::Type::kNestableTasksAllowed
-  // instead). It can however still be useful in a few scenarios where re-
-  // entrancy is caused by a native message loop.
-  // TODO(gab): Remove usage of this class alongside RunLoop and rename it to
-  // ScopedApplicationTasksAllowedInNativeNestedLoop(?) for remaining use cases.
-  class BASE_EXPORT ScopedNestableTaskAllower {
+  // Use RunLoop::Type::kNestableTasksAllowed when nesting is triggered by the
+  // application RunLoop rather than by native code.
+  class BASE_EXPORT ScopedAllowApplicationTasksInNativeNestedLoop {
    public:
-    ScopedNestableTaskAllower();
-    ~ScopedNestableTaskAllower();
+    ScopedAllowApplicationTasksInNativeNestedLoop();
+    ~ScopedAllowApplicationTasksInNativeNestedLoop();
 
    private:
     sequence_manager::internal::SequenceManagerImpl* const sequence_manager_;
-    const bool old_state_;
+    const bool previous_state_;
   };
+
+  // TODO(https://crbug.com/781352): Remove usage of this old class. Either
+  // renaming it to ScopedAllowApplicationTasksInNativeNestedLoop when truly
+  // native or migrating it to RunLoop::Type::kNestableTasksAllowed otherwise.
+  using ScopedNestableTaskAllower =
+      ScopedAllowApplicationTasksInNativeNestedLoop;
+
+  // Returns true if nestable tasks are allowed on the current loop at this time
+  // (i.e. if a nested loop would start from the callee's point in the stack,
+  // would it be allowed to run application tasks).
+  bool NestableTasksAllowed() const;
 
   // Returns true if this is the active MessageLoop for the current thread.
   bool IsBoundToCurrentThread() const;
@@ -185,13 +175,12 @@ class BASE_EXPORT MessageLoopCurrent {
   static sequence_manager::internal::SequenceManagerImpl*
   GetCurrentSequenceManagerImpl();
 
-  friend class MessageLoopImpl;
   friend class MessagePumpLibeventTest;
   friend class ScheduleWorkTest;
   friend class Thread;
   friend class sequence_manager::internal::SequenceManagerImpl;
   friend class MessageLoopTaskRunnerTest;
-  friend class web::TestWebThreadBundle;
+  friend class web::WebTaskEnvironment;
 
   sequence_manager::internal::SequenceManagerImpl* current_;
 };
@@ -211,10 +200,10 @@ class BASE_EXPORT MessageLoopCurrentForUI : public MessageLoopCurrent {
   MessageLoopCurrentForUI* operator->() { return this; }
 
 #if defined(USE_OZONE) && !defined(OS_FUCHSIA) && !defined(OS_WIN)
-  // Please see MessagePumpLibevent for definition.
-  static_assert(std::is_same<MessagePumpForUI, MessagePumpLibevent>::value,
-                "MessageLoopCurrentForUI::WatchFileDescriptor is not supported "
-                "when MessagePumpForUI is not a MessagePumpLibevent.");
+  static_assert(
+      std::is_base_of<WatchableIOMessagePumpPosix, MessagePumpForUI>::value,
+      "MessageLoopCurrentForUI::WatchFileDescriptor is supported only"
+      "by MessagePumpLibevent and MessagePumpGlib implementations.");
   bool WatchFileDescriptor(int fd,
                            bool persistent,
                            MessagePumpForUI::Mode mode,

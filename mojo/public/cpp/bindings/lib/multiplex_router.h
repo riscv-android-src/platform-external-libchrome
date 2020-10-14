@@ -24,11 +24,13 @@
 #include "base/sequenced_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "mojo/public/cpp/bindings/associated_group_controller.h"
+#include "mojo/public/cpp/bindings/async_flusher.h"
 #include "mojo/public/cpp/bindings/connection_group.h"
 #include "mojo/public/cpp/bindings/connector.h"
-#include "mojo/public/cpp/bindings/filter_chain.h"
 #include "mojo/public/cpp/bindings/interface_id.h"
+#include "mojo/public/cpp/bindings/message_dispatcher.h"
 #include "mojo/public/cpp/bindings/message_header_validator.h"
+#include "mojo/public/cpp/bindings/pending_flush.h"
 #include "mojo/public/cpp/bindings/pipe_control_message_handler.h"
 #include "mojo/public/cpp/bindings/pipe_control_message_handler_delegate.h"
 #include "mojo/public/cpp/bindings/pipe_control_message_proxy.h"
@@ -45,7 +47,7 @@ namespace internal {
 // MultiplexRouter supports routing messages for multiple interfaces over a
 // single message pipe.
 //
-// It is created on the sequence where the master interface of the message pipe
+// It is created on the sequence where the primary interface of the message pipe
 // lives.
 // Some public methods are only allowed to be called on the creating sequence;
 // while the others are safe to call from any sequence. Please see the method
@@ -59,14 +61,14 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MultiplexRouter
       public PipeControlMessageHandlerDelegate {
  public:
   enum Config {
-    // There is only the master interface running on this router. Please note
+    // There is only the primary interface running on this router. Please note
     // that because of interface versioning, the other side of the message pipe
-    // may use a newer master interface definition which passes associated
+    // may use a newer primary interface definition which passes associated
     // interfaces. In that case, this router may still receive pipe control
     // messages or messages targetting associated interfaces.
     SINGLE_INTERFACE,
-    // Similar to the mode above, there is only the master interface running on
-    // this router. Besides, the master interface has sync methods.
+    // Similar to the mode above, there is only the primary interface running on
+    // this router. Besides, the primary interface has sync methods.
     SINGLE_INTERFACE_WITH_SYNC_METHODS,
     // There may be associated interfaces running on this router.
     MULTI_INTERFACE
@@ -79,14 +81,14 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MultiplexRouter
                   bool set_interface_id_namespace_bit,
                   scoped_refptr<base::SequencedTaskRunner> runner);
 
-  // Adds a MessageReceiver which can filter a message after validation but
+  // Sets a MessageReceiver which can filter a message after validation but
   // before dispatch.
-  void AddIncomingMessageFilter(std::unique_ptr<MessageReceiver> filter);
+  void SetIncomingMessageFilter(std::unique_ptr<MessageFilter> filter);
 
-  // Sets the master interface name for this router. Only used when reporting
+  // Sets the primary interface name for this router. Only used when reporting
   // message header or control message validation errors.
   // |name| must be a string literal.
-  void SetMasterInterfaceName(const char* name);
+  void SetPrimaryInterfaceName(const char* name);
 
   // Adds this object to a ConnectionGroup identified by |ref|. All receiving
   // pipe endpoints decoded from inbound messages on this MultiplexRouter will
@@ -128,16 +130,23 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MultiplexRouter
     return connector_.PassMessagePipe();
   }
 
-  // Blocks the current sequence until the first incoming message, or
-  // |deadline|.
-  bool WaitForIncomingMessage(MojoDeadline deadline) {
+  // Blocks the current sequence until the first incoming message.
+  bool WaitForIncomingMessage() {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-    return connector_.WaitForIncomingMessage(deadline);
+    return connector_.WaitForIncomingMessage();
   }
 
   // See Binding for details of pause/resume.
   void PauseIncomingMethodCallProcessing();
   void ResumeIncomingMethodCallProcessing();
+
+  // Initiates an async flush operation. |flusher| signals its corresponding
+  // PendingFlush when the flush is actually complete.
+  void FlushAsync(AsyncFlusher flusher);
+
+  // Pauses the peer endpoint's message processing until a (potentially remote)
+  // flush operation corresponding to |flush| is completed.
+  void PausePeerUntilFlushCompletes(PendingFlush flush);
 
   // Whether there are any associated interfaces running currently.
   bool HasAssociatedEndpoints() const;
@@ -163,7 +172,7 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MultiplexRouter
   }
 
   bool SimulateReceivingMessageForTesting(Message* message) {
-    return filters_.Accept(message);
+    return dispatcher_.Accept(message);
   }
 
  private:
@@ -180,8 +189,11 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MultiplexRouter
   bool OnPeerAssociatedEndpointClosed(
       InterfaceId id,
       const base::Optional<DisconnectReason>& reason) override;
+  bool WaitForFlushToComplete(ScopedMessagePipeHandle flush_pipe) override;
 
   void OnPipeConnectionError(bool force_async_dispatch);
+  void OnFlushPipeSignaled(MojoResult result, const HandleSignalsState& state);
+  void PauseInternal(bool must_resume_manually);
 
   // Specifies whether we are allowed to directly call into
   // InterfaceEndpointClient (given that we are already on the same sequence as
@@ -251,11 +263,15 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MultiplexRouter
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
-  // Owned by |filters_| below.
+  // Owned by |dispatcher_| below.
   MessageHeaderValidator* header_validator_ = nullptr;
 
-  FilterChain filters_;
+  MessageDispatcher dispatcher_;
   Connector connector_;
+
+  // Active whenever dispatch is blocked by a pending remote flush.
+  ScopedMessagePipeHandle active_flush_pipe_;
+  base::Optional<mojo::SimpleWatcher> flush_pipe_watcher_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
@@ -280,7 +296,15 @@ class COMPONENT_EXPORT(MOJO_CPP_BINDINGS) MultiplexRouter
 
   bool encountered_error_ = false;
 
+  // Indicates whether this router is paused, meaning it is not currently
+  // listening for or dispatching available inbound messages.
   bool paused_ = false;
+
+  // If this router is paused, this indicates whether the pause is due to an
+  // explicit call to |PauseIncomingMethodCallProcessing()| when |true|, or
+  // due implicit pause when waiting on an async flush operation when |false|.
+  // When |paused_| is |false|, this value is ignored.
+  bool must_resume_manually_ = false;
 
   bool testing_mode_ = false;
 

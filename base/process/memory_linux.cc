@@ -18,14 +18,9 @@
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 
-#if defined(USE_TCMALLOC)
-#if BUILDFLAG(USE_NEW_TCMALLOC)
+#if BUILDFLAG(USE_TCMALLOC)
 #include "third_party/tcmalloc/chromium/src/config.h"
 #include "third_party/tcmalloc/chromium/src/gperftools/tcmalloc.h"
-#else
-#include "third_party/tcmalloc/gperftools-2.0/chromium/src/config.h"
-#include "third_party/tcmalloc/gperftools-2.0/chromium/src/gperftools/tcmalloc.h"
-#endif
 #endif
 
 extern "C" {
@@ -46,8 +41,16 @@ void OnNoMemorySize(size_t size) {
   LOG(FATAL) << "Out of memory.";
 }
 
-void OnNoMemory() {
+// NOINLINE as base::`anonymous namespace`::OnNoMemory() is recognized by the
+// crash server.
+NOINLINE void OnNoMemory() {
   OnNoMemorySize(0);
+}
+
+void ReleaseReservationOrTerminate() {
+  if (internal::ReleaseAddressSpaceReservation())
+    return;
+  OnNoMemory();
 }
 
 }  // namespace
@@ -58,7 +61,7 @@ void EnableTerminationOnHeapCorruption() {
 
 void EnableTerminationOnOutOfMemory() {
   // Set the new-out of memory handler.
-  std::set_new_handler(&OnNoMemory);
+  std::set_new_handler(&ReleaseReservationOrTerminate);
   // If we're using glibc's allocator, the above functions will override
   // malloc and friends and make them die on out of memory.
 
@@ -133,11 +136,11 @@ bool UncheckedMalloc(size_t size, void** result) {
 #if BUILDFLAG(USE_ALLOCATOR_SHIM)
   *result = allocator::UncheckedAlloc(size);
 #elif defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || \
-    (!defined(LIBC_GLIBC) && !defined(USE_TCMALLOC))
+    (!defined(LIBC_GLIBC) && !BUILDFLAG(USE_TCMALLOC))
   *result = malloc(size);
-#elif defined(LIBC_GLIBC) && !defined(USE_TCMALLOC)
+#elif defined(LIBC_GLIBC) && !BUILDFLAG(USE_TCMALLOC)
   *result = __libc_malloc(size);
-#elif defined(USE_TCMALLOC)
+#elif BUILDFLAG(USE_TCMALLOC)
   *result = tc_malloc_skip_new_handler(size);
 #endif
   return *result != nullptr;

@@ -31,9 +31,14 @@
 #include "base/pickle.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
 #include "build/build_config.h"
+
+namespace {
+constexpr char kAsciiNewLine[] = "\n";
+}  // namespace
 
 namespace base {
 
@@ -455,12 +460,8 @@ bool Histogram::InspectConstructionArguments(StringPiece name,
     // them here.
     // Blink.UseCounter legitimately has more than 1000 entries in its enum.
     // Arc.OOMKills: https://crbug.com/916757
-    // BlinkGC.CommittedSize: https://crbug.com/916761
-    // PartitionAlloc.CommittedSize: https://crbug.com/916761
     if (!name.starts_with("Blink.UseCounter") &&
-        !name.starts_with("Arc.OOMKills.") &&
-        name != "BlinkGC.CommittedSize" &&
-        name != "PartitionAlloc.CommittedSize") {
+        !name.starts_with("Arc.OOMKills.")) {
       DVLOG(1) << "Histogram: " << name
                << " has bad bucket_count: " << *bucket_count << " (limit "
                << kBucketCount_MAX << ")";
@@ -530,7 +531,8 @@ void Histogram::AddCount(int value, int count) {
   }
   unlogged_samples_->Accumulate(value, count);
 
-  FindAndRunCallback(value);
+  if (UNLIKELY(StatisticsRecorder::have_active_callbacks()))
+    FindAndRunCallback(value);
 }
 
 std::unique_ptr<HistogramSamples> Histogram::SnapshotSamples() const {
@@ -578,16 +580,27 @@ bool Histogram::AddSamplesFromPickle(PickleIterator* iter) {
   return unlogged_samples_->AddFromPickle(iter);
 }
 
-// The following methods provide a graphical histogram display.
-void Histogram::WriteHTMLGraph(std::string* output) const {
-  // TBD(jar) Write a nice HTML bar chart, with divs an mouse-overs etc.
-  output->append("<PRE>");
-  WriteAsciiImpl(true, "<br>", output);
-  output->append("</PRE>");
+void Histogram::WriteAscii(std::string* output) const {
+  // Get local (stack) copies of all effectively volatile class data so that we
+  // are consistent across our output activities.
+  std::unique_ptr<SampleVector> snapshot = SnapshotAllSamples();
+  WriteAsciiHeader(*snapshot, output);
+  output->append(kAsciiNewLine);
+  WriteAsciiBody(*snapshot, true, kAsciiNewLine, output);
 }
 
-void Histogram::WriteAscii(std::string* output) const {
-  WriteAsciiImpl(true, "\n", output);
+base::DictionaryValue Histogram::ToGraphDict() const {
+  std::unique_ptr<SampleVector> snapshot = SnapshotAllSamples();
+  std::string header;
+  std::string body;
+  base::DictionaryValue dict;
+
+  WriteAsciiHeader(*snapshot, &header);
+  WriteAsciiBody(*snapshot, true, kAsciiNewLine, &body);
+  dict.SetString("header", header);
+  dict.SetString("body", body);
+
+  return dict;
 }
 
 void Histogram::ValidateHistogramContents() const {
@@ -702,26 +715,21 @@ std::unique_ptr<SampleVector> Histogram::SnapshotUnloggedSamples() const {
   return samples;
 }
 
-void Histogram::WriteAsciiImpl(bool graph_it,
+void Histogram::WriteAsciiBody(const SampleVector& snapshot,
+                               bool graph_it,
                                const std::string& newline,
                                std::string* output) const {
-  // Get local (stack) copies of all effectively volatile class data so that we
-  // are consistent across our output activities.
-  std::unique_ptr<SampleVector> snapshot = SnapshotAllSamples();
-  Count sample_count = snapshot->TotalCount();
-
-  WriteAsciiHeader(*snapshot, sample_count, output);
-  output->append(newline);
+  Count sample_count = snapshot.TotalCount();
 
   // Prepare to normalize graphical rendering of bucket contents.
   double max_size = 0;
   if (graph_it)
-    max_size = GetPeakBucketSize(*snapshot);
+    max_size = GetPeakBucketSize(snapshot);
 
   // Calculate space needed to print bucket range numbers.  Leave room to print
   // nearly the largest bucket range without sliding over the histogram.
   uint32_t largest_non_empty_bucket = bucket_count() - 1;
-  while (0 == snapshot->GetCountAtIndex(largest_non_empty_bucket)) {
+  while (0 == snapshot.GetCountAtIndex(largest_non_empty_bucket)) {
     if (0 == largest_non_empty_bucket)
       break;  // All buckets are empty.
     --largest_non_empty_bucket;
@@ -730,7 +738,7 @@ void Histogram::WriteAsciiImpl(bool graph_it,
   // Calculate largest print width needed for any of our bucket range displays.
   size_t print_width = 1;
   for (uint32_t i = 0; i < bucket_count(); ++i) {
-    if (snapshot->GetCountAtIndex(i)) {
+    if (snapshot.GetCountAtIndex(i)) {
       size_t width = GetAsciiBucketRange(i).size() + 1;
       if (width > print_width)
         print_width = width;
@@ -741,7 +749,7 @@ void Histogram::WriteAsciiImpl(bool graph_it,
   int64_t past = 0;
   // Output the actual histogram graph.
   for (uint32_t i = 0; i < bucket_count(); ++i) {
-    Count current = snapshot->GetCountAtIndex(i);
+    Count current = snapshot.GetCountAtIndex(i);
     if (!current && !PrintEmptyBucket(i))
       continue;
     remaining -= current;
@@ -750,9 +758,8 @@ void Histogram::WriteAsciiImpl(bool graph_it,
     for (size_t j = 0; range.size() + j < print_width + 1; ++j)
       output->push_back(' ');
     if (0 == current && i < bucket_count() - 1 &&
-        0 == snapshot->GetCountAtIndex(i + 1)) {
-      while (i < bucket_count() - 1 &&
-             0 == snapshot->GetCountAtIndex(i + 1)) {
+        0 == snapshot.GetCountAtIndex(i + 1)) {
+      while (i < bucket_count() - 1 && 0 == snapshot.GetCountAtIndex(i + 1)) {
         ++i;
       }
       output->append("... ");
@@ -780,8 +787,9 @@ double Histogram::GetPeakBucketSize(const SampleVectorBase& samples) const {
 }
 
 void Histogram::WriteAsciiHeader(const SampleVectorBase& samples,
-                                 Count sample_count,
                                  std::string* output) const {
+  Count sample_count = samples.TotalCount();
+
   StringAppendF(output, "Histogram: %s recorded %d samples", histogram_name(),
                 sample_count);
   if (sample_count == 0) {
@@ -812,27 +820,6 @@ void Histogram::GetParameters(DictionaryValue* params) const {
   params->SetIntKey("min", declared_min());
   params->SetIntKey("max", declared_max());
   params->SetIntKey("bucket_count", static_cast<int>(bucket_count()));
-}
-
-void Histogram::GetCountAndBucketData(Count* count,
-                                      int64_t* sum,
-                                      ListValue* buckets) const {
-  std::unique_ptr<SampleVector> snapshot = SnapshotAllSamples();
-  *count = snapshot->TotalCount();
-  *sum = snapshot->sum();
-  uint32_t index = 0;
-  for (uint32_t i = 0; i < bucket_count(); ++i) {
-    Sample count_at_index = snapshot->GetCountAtIndex(i);
-    if (count_at_index > 0) {
-      std::unique_ptr<DictionaryValue> bucket_value(new DictionaryValue());
-      bucket_value->SetIntKey("low", ranges(i));
-      if (i != bucket_count() - 1)
-        bucket_value->SetIntKey("high", ranges(i + 1));
-      bucket_value->SetIntKey("count", count_at_index);
-      buckets->Set(index, std::move(bucket_value));
-      ++index;
-    }
-  }
 }
 
 //------------------------------------------------------------------------------

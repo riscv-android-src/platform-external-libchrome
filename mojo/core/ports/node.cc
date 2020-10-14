@@ -15,6 +15,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/notreached.h"
 #include "base/optional.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_local.h"
@@ -87,6 +88,8 @@ bool CanAcceptMoreMessages(const Port* port) {
   if (port->state == Port::kClosed)
     return false;
   if (port->peer_closed || port->remove_proxy_on_last_message) {
+    if (port->peer_lost_unexpectedly)
+      return port->message_queue.HasNextMessage();
     if (port->last_sequence_num_to_receive == next_sequence_num - 1)
       return false;
   }
@@ -962,7 +965,8 @@ int Node::OnUserMessageReadAck(std::unique_ptr<UserMessageReadAckEvent> event) {
   if (ack_request_event)
     delegate_->ForwardEvent(peer_node_name, std::move(ack_request_event));
 
-  delegate_->PortStatusChanged(port_ref);
+  if (port_ref.is_valid())
+    delegate_->PortStatusChanged(port_ref);
 
   return OK;
 }
@@ -1537,9 +1541,7 @@ void Node::DestroyAllPortsWithPeer(const NodeName& node_name,
           // messages.
 
           port->peer_closed = true;
-          port->last_sequence_num_to_receive =
-              port->message_queue.next_sequence_num() - 1;
-
+          port->peer_lost_unexpectedly = true;
           if (port->state == Port::kReceiving)
             ports_to_notify.push_back(local_port_ref);
         }
@@ -1725,7 +1727,7 @@ Node::DelegateHolder::DelegateHolder(Node* node, NodeDelegate* delegate)
   DCHECK(node_);
 }
 
-Node::DelegateHolder::~DelegateHolder() {}
+Node::DelegateHolder::~DelegateHolder() = default;
 
 #if DCHECK_IS_ON()
 void Node::DelegateHolder::EnsureSafeDelegateAccess() const {

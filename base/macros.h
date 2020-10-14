@@ -15,6 +15,10 @@
 #include <android-base/macros.h>
 #endif  // defined(ANDROID)
 
+// ALL DISALLOW_xxx MACROS ARE DEPRECATED; DO NOT USE IN NEW CODE.
+// Use explicit deletions instead.  See the section on copyability/movability in
+// //styleguide/c++/c++-dos-and-donts.md for more information.
+
 // Put this in the declarations for a class to be uncopyable.
 #if !defined(DISALLOW_COPY)
 #define DISALLOW_COPY(TypeName) \

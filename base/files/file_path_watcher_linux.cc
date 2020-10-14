@@ -38,7 +38,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "base/threading/sequenced_task_runner_handle.h"
-#include "base/trace_event/trace_event.h"
+#include "base/trace_event/base_tracing.h"
 
 namespace base {
 
@@ -270,9 +270,6 @@ void InotifyReaderThreadDelegate::ThreadMain() {
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(inotify_fd_, &rfds);
-
-    ScopedBlockingCall scoped_blocking_call(FROM_HERE,
-                                            BlockingType::WILL_BLOCK);
 
     // Wait until some inotify events are available.
     int select_result =
@@ -629,6 +626,9 @@ void FilePathWatcherImpl::UpdateRecursiveWatches(
       break;
     if (!DirectoryExists(cur_path))
       g_inotify_reader.Get().RemoveWatch(end_it->second, this);
+
+    // Keep it in sync with |recursive_watches_by_path_| crbug.com/995196.
+    recursive_paths_by_watch_.erase(end_it->second);
   }
   recursive_watches_by_path_.erase(start_it, end_it);
   UpdateRecursiveWatchesForPath(changed_dir);

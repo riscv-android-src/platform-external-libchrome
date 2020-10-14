@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <type_traits>
 
 #include "base/base_export.h"
 #include "base/strings/string_piece.h"
@@ -20,6 +21,7 @@ namespace base {
 // This would cause SIGBUS on ARMv5 or earlier and ARMv6-M.
 template<typename T>
 inline void ReadBigEndian(const char buf[], T* out) {
+  static_assert(std::is_integral<T>::value, "T has to be an integral type.");
   *out = buf[0];
   for (size_t i = 1; i < sizeof(T); ++i) {
     *out <<= 8;
@@ -32,6 +34,7 @@ inline void ReadBigEndian(const char buf[], T* out) {
 // Note: this loop is unrolled with -O1 and above.
 template<typename T>
 inline void WriteBigEndian(char buf[], T val) {
+  static_assert(std::is_integral<T>::value, "T has to be an integral type.");
   for (size_t i = 0; i < sizeof(T); ++i) {
     buf[sizeof(T)-i-1] = static_cast<char>(val & 0xFF);
     val >>= 8;
@@ -67,10 +70,26 @@ class BASE_EXPORT BigEndianReader {
   bool ReadU32(uint32_t* value);
   bool ReadU64(uint64_t* value);
 
+  // Reads a length-prefixed region:
+  // 1. reads a big-endian length L from the buffer;
+  // 2. sets |*out| to a StringPiece over the next L many bytes
+  // of the buffer (beyond the end of the bytes encoding the length); and
+  // 3. skips the main reader past this L-byte substring.
+  //
+  // Fails if reading a U8 or U16 fails, or if the parsed length is greater
+  // than the number of bytes remaining in the stream.
+  //
+  // On failure, leaves the stream at the same position
+  // as before the call.
+  bool ReadU8LengthPrefixed(base::StringPiece* out);
+  bool ReadU16LengthPrefixed(base::StringPiece* out);
+
  private:
   // Hidden to promote type safety.
   template<typename T>
   bool Read(T* v);
+  template <typename T>
+  bool ReadLengthPrefixed(base::StringPiece* out);
 
   const char* ptr_;
   const char* end_;

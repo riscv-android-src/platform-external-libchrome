@@ -1,0 +1,35 @@
+diff --git a/mojo/core/embedder/embedder.cc b/mojo/core/embedder/embedder.cc
+index b25d369397ea..3a4e3172938c 100644
+--- a/mojo/core/embedder/embedder.cc
++++ b/mojo/core/embedder/embedder.cc
+@@ -28,7 +28,7 @@ void Init() {
+   Init(Configuration());
+ }
+ 
+-scoped_refptr<base::TaskRunner> GetIOTaskRunner() {
++scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() {
+   return Core::Get()->GetNodeController()->io_task_runner();
+ }
+ 
+diff --git a/mojo/core/embedder/embedder.h b/mojo/core/embedder/embedder.h
+index 8e5fce7e105b..574b3ded1a64 100644
+--- a/mojo/core/embedder/embedder.h
++++ b/mojo/core/embedder/embedder.h
+@@ -12,7 +12,7 @@
+ #include "base/component_export.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/process/process_handle.h"
+-#include "base/task_runner.h"
++#include "base/single_thread_task_runner.h"
+ #include "build/build_config.h"
+ #include "mojo/core/embedder/configuration.h"
+ 
+@@ -35,7 +35,7 @@ COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void Init();
+ 
+ // Retrieves the TaskRunner used for IPC I/O, as set by ScopedIPCSupport.
+ COMPONENT_EXPORT(MOJO_CORE_EMBEDDER)
+-scoped_refptr<base::TaskRunner> GetIOTaskRunner();
++scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner();
+ 
+ }  // namespace core
+ }  // namespace mojo

@@ -132,26 +132,6 @@ namespace trace_event {
 
 class TraceEventMemoryOverhead;
 
-// libchrome has trace disabled. ConvertableToTraceFormat is a stub
-// implementation for real ConvertableToTraceFormat below.
-#if 1
-
-class ConvertableToTraceFormat {
- public:
-  class ProtoAppender {
-   public:
-    virtual ~ProtoAppender() = default;
-  };
-  ConvertableToTraceFormat() = default;
-  virtual ~ConvertableToTraceFormat() = default;
-  virtual void AppendAsTraceFormat(std::string*) const {}
-  virtual void EstimateTraceMemoryOverhead(TraceEventMemoryOverhead*) {}
-  virtual bool AppendToProto(ProtoAppender*) { return true; }
-  std::string ToString() { return std::string(); }
-};
-
-#else
-
 // For any argument of type TRACE_VALUE_TYPE_CONVERTABLE the provided
 // class must implement this interface. Note that unlike other values,
 // these objects will be owned by the TraceArguments instance that points
@@ -184,17 +164,9 @@ class BASE_EXPORT ConvertableToTraceFormat {
 
   virtual void EstimateTraceMemoryOverhead(TraceEventMemoryOverhead* overhead);
 
-  std::string ToString() const {
-    std::string result;
-    AppendAsTraceFormat(&result);
-    return result;
-  }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(ConvertableToTraceFormat);
 };
-
-#endif
 
 const int kTraceMaxNumArgs = 2;
 

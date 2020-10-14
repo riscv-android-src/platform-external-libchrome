@@ -8,21 +8,22 @@
 #include <memory>
 
 #include "base/base_export.h"
+#include "base/containers/circular_deque.h"
 #include "base/profiler/frame.h"
 #include "base/profiler/register_context.h"
+#include "base/profiler/stack_copier.h"
 #include "base/profiler/stack_sampler.h"
 
 namespace base {
 
-class ThreadDelegate;
 class Unwinder;
 
-// Cross-platform stack sampler implementation. Delegates to ThreadDelegate for
-// platform-specific implementation.
+// Cross-platform stack sampler implementation. Delegates to StackCopier for the
+// platform-specific stack copying implementation.
 class BASE_EXPORT StackSamplerImpl : public StackSampler {
  public:
-  StackSamplerImpl(std::unique_ptr<ThreadDelegate> delegate,
-                   std::unique_ptr<Unwinder> native_unwinder,
+  StackSamplerImpl(std::unique_ptr<StackCopier> stack_copier,
+                   std::vector<std::unique_ptr<Unwinder>> core_unwinders,
                    ModuleCache* module_cache,
                    StackSamplerTestDelegate* test_delegate = nullptr);
   ~StackSamplerImpl() override;
@@ -36,43 +37,25 @@ class BASE_EXPORT StackSamplerImpl : public StackSampler {
                          ProfileBuilder* profile_builder) override;
 
   // Exposes the internal function for unit testing.
-  static std::vector<Frame> WalkStackForTesting(ModuleCache* module_cache,
-                                                RegisterContext* thread_context,
-                                                uintptr_t stack_top,
-                                                Unwinder* native_unwinder,
-                                                Unwinder* aux_unwinder);
+  static std::vector<Frame> WalkStackForTesting(
+      ModuleCache* module_cache,
+      RegisterContext* thread_context,
+      uintptr_t stack_top,
+      const base::circular_deque<std::unique_ptr<Unwinder>>& unwinders);
 
  private:
-  bool CopyStack(StackBuffer* stack_buffer,
-                 uintptr_t* stack_top,
-                 ProfileBuilder* profile_builder,
-                 RegisterContext* thread_context);
+  static std::vector<Frame> WalkStack(
+      ModuleCache* module_cache,
+      RegisterContext* thread_context,
+      uintptr_t stack_top,
+      const base::circular_deque<std::unique_ptr<Unwinder>>& unwinders);
 
-  static std::vector<Frame> WalkStack(ModuleCache* module_cache,
-                                      RegisterContext* thread_context,
-                                      uintptr_t stack_top,
-                                      Unwinder* native_unwinder,
-                                      Unwinder* aux_unwinder);
-
-  const std::unique_ptr<ThreadDelegate> thread_delegate_;
-  const std::unique_ptr<Unwinder> native_unwinder_;
-  std::unique_ptr<Unwinder> aux_unwinder_;
+  const std::unique_ptr<StackCopier> stack_copier_;
+  // Store all unwinder in decreasing priority order.
+  base::circular_deque<std::unique_ptr<Unwinder>> unwinders_;
   ModuleCache* const module_cache_;
   StackSamplerTestDelegate* const test_delegate_;
 };
-
-// These two functions are exposed for testing.
-
-BASE_EXPORT uintptr_t
-RewritePointerIfInOriginalStack(const uint8_t* original_stack_bottom,
-                                const uintptr_t* original_stack_top,
-                                const uint8_t* stack_copy_bottom,
-                                uintptr_t pointer);
-
-BASE_EXPORT const uint8_t* CopyStackContentsAndRewritePointers(
-    const uint8_t* original_stack_bottom,
-    const uintptr_t* original_stack_top,
-    uintptr_t* stack_buffer_bottom);
 
 }  // namespace base
 

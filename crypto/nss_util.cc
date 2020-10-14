@@ -39,14 +39,14 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/native_library.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_executor.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_checker.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 
 #if !defined(OS_CHROMEOS)
@@ -381,22 +381,16 @@ class NSSInitSingleton {
     std::unique_ptr<TPMModuleAndSlot> tpm_args(
         new TPMModuleAndSlot(chaps_module_));
     TPMModuleAndSlot* tpm_args_ptr = tpm_args.get();
-    if (base::WorkerPool::PostTaskAndReply(
-            FROM_HERE,
-            base::Bind(&NSSInitSingleton::InitializeTPMTokenOnWorkerThread,
-                       system_slot_id,
-                       tpm_args_ptr),
-            base::Bind(&NSSInitSingleton::OnInitializedTPMTokenAndSystemSlot,
-                       base::Unretained(this),  // NSSInitSingleton is leaky
-                       callback,
-                       base::Passed(&tpm_args)),
-            true /* task_is_slow */
-            )) {
-      initializing_tpm_token_ = true;
-    } else {
-      base::MessageLoop::current()->task_runner()->PostTask(
-          FROM_HERE, base::Bind(callback, false));
-    }
+    base::ThreadPool::PostTaskAndReply(
+        FROM_HERE,
+        base::Bind(&NSSInitSingleton::InitializeTPMTokenOnWorkerThread,
+                   system_slot_id,
+                   tpm_args_ptr),
+        base::Bind(&NSSInitSingleton::OnInitializedTPMTokenAndSystemSlot,
+                   base::Unretained(this),  // NSSInitSingleton is leaky
+                   callback,
+                   base::Passed(&tpm_args)));
+    initializing_tpm_token_ = true;
   }
 
   static void InitializeTPMTokenOnWorkerThread(CK_SLOT_ID token_slot_id,
@@ -509,7 +503,7 @@ class NSSInitSingleton {
         "%s %s", kUserNSSDatabaseName, username_hash.c_str());
     ScopedPK11Slot public_slot(OpenPersistentNSSDBForPath(db_name, path));
     chromeos_user_map_[username_hash] =
-        base::MakeUnique<ChromeOSUserData>(std::move(public_slot));
+        std::make_unique<ChromeOSUserData>(std::move(public_slot));
     return true;
   }
 
@@ -544,7 +538,7 @@ class NSSInitSingleton {
     std::unique_ptr<TPMModuleAndSlot> tpm_args(
         new TPMModuleAndSlot(chaps_module_));
     TPMModuleAndSlot* tpm_args_ptr = tpm_args.get();
-    base::WorkerPool::PostTaskAndReply(
+    base::ThreadPool::PostTaskAndReply(
         FROM_HERE,
         base::Bind(&NSSInitSingleton::InitializeTPMTokenOnWorkerThread,
                    slot_id,
@@ -552,9 +546,7 @@ class NSSInitSingleton {
         base::Bind(&NSSInitSingleton::OnInitializedTPMForChromeOSUser,
                    base::Unretained(this),  // NSSInitSingleton is leaky
                    username_hash,
-                   base::Passed(&tpm_args)),
-        true /* task_is_slow */
-        );
+                   base::Passed(&tpm_args)));
   }
 
   void OnInitializedTPMForChromeOSUser(

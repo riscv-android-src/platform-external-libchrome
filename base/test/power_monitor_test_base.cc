@@ -4,7 +4,6 @@
 
 #include "base/test/power_monitor_test_base.h"
 
-#include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_current.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_source.h"
@@ -40,6 +39,12 @@ bool PowerMonitorTestSource::IsOnBatteryPowerImpl() {
   return test_on_battery_power_;
 }
 
+void PowerMonitorTestSource::GenerateThermalThrottlingEvent(
+    PowerObserver::DeviceThermalState new_thermal_state) {
+  ProcessThermalEvent(new_thermal_state);
+  RunLoop().RunUntilIdle();
+}
+
 PowerMonitorTestObserver::PowerMonitorTestObserver()
     : last_power_state_(false),
       power_state_changes_(0),
@@ -61,6 +66,11 @@ void PowerMonitorTestObserver::OnSuspend() {
 
 void PowerMonitorTestObserver::OnResume() {
   resumes_++;
+}
+
+void PowerMonitorTestObserver::OnThermalStateChange(
+    PowerObserver::DeviceThermalState new_state) {
+  last_thermal_state_ = new_state;
 }
 
 }  // namespace base

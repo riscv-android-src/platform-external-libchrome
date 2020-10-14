@@ -259,7 +259,7 @@ NO_INSTRUMENT_FUNCTION bool DumpToFile(const base::FilePath& path) {
                                 base::StringPrintf("%" PRIuS, caller_index));
     callee_element.SetStringKey("callee_offset",
                                 base::StringPrintf("%" PRIu32, callee_offset));
-    std::string offset_str = "";
+    std::string offset_str;
     ListValue callers_list;
     for (size_t j = 0; j < kTotalBuckets; j++) {
       uint32_t caller_offset =
@@ -283,10 +283,10 @@ NO_INSTRUMENT_FUNCTION bool DumpToFile(const base::FilePath& path) {
       caller_count.SetStringKey("caller_offset",
                                 base::StringPrintf("%" PRIu32, caller_offset));
       caller_count.SetStringKey("count", base::StringPrintf("%" PRIu32, count));
-      callers_list.GetList().push_back(std::move(caller_count));
+      callers_list.Append(std::move(caller_count));
     }
     callee_element.SetKey("caller_and_count", std::move(callers_list));
-    call_graph.GetList().push_back(std::move(callee_element));
+    call_graph.Append(std::move(callee_element));
   }
 
   root.SetKey("call_graph", std::move(call_graph));

@@ -10,8 +10,9 @@
 #include "base/sequenced_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/trace_event/heap_profiler.h"
-#include "base/trace_event/trace_event.h"
+// #include "base/trace_event/heap_profiler.h"
+// #include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_stub.h"
 #include "mojo/public/c/system/trap.h"
 
 namespace mojo {
@@ -161,12 +162,12 @@ bool SimpleWatcher::IsWatching() const {
 MojoResult SimpleWatcher::Watch(Handle handle,
                                 MojoHandleSignals signals,
                                 MojoTriggerCondition condition,
-                                const ReadyCallbackWithState& callback) {
+                                ReadyCallbackWithState callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!IsWatching());
   DCHECK(!callback.is_null());
 
-  callback_ = callback;
+  callback_ = std::move(callback);
   handle_ = handle;
   watch_id_ += 1;
 

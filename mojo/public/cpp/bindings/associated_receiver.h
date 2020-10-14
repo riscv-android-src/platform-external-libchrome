@@ -139,6 +139,38 @@ class AssociatedReceiver {
     return remote;
   }
 
+  // Like BindNewEndpointAndPassRemote() above, but it creates a dedicated
+  // message pipe. The returned remote can be bound directly to an
+  // implementation, without being first passed through a message pipe endpoint.
+  //
+  // For testing, where the returned request is bound to e.g. a mock and there
+  // are no other interfaces involved.
+  PendingAssociatedRemote<Interface>
+  BindNewEndpointAndPassDedicatedRemoteForTesting() WARN_UNUSED_RESULT {
+    DCHECK(!is_bound()) << "AssociatedReceiver is already bound";
+
+    MessagePipe pipe;
+    scoped_refptr<internal::MultiplexRouter> router0 =
+        new internal::MultiplexRouter(
+            std::move(pipe.handle0), internal::MultiplexRouter::MULTI_INTERFACE,
+            false, base::SequencedTaskRunnerHandle::Get());
+    scoped_refptr<internal::MultiplexRouter> router1 =
+        new internal::MultiplexRouter(
+            std::move(pipe.handle1), internal::MultiplexRouter::MULTI_INTERFACE,
+            true, base::SequencedTaskRunnerHandle::Get());
+
+    ScopedInterfaceEndpointHandle remote_handle;
+    ScopedInterfaceEndpointHandle receiver_handle;
+    ScopedInterfaceEndpointHandle::CreatePairPendingAssociation(
+        &remote_handle, &receiver_handle);
+    InterfaceId id = router1->AssociateInterface(std::move(receiver_handle));
+    receiver_handle = router0->CreateLocalEndpointHandle(id);
+
+    Bind(PendingAssociatedReceiver<Interface>(std::move(receiver_handle)),
+         nullptr);
+    return PendingAssociatedRemote<Interface>(std::move(remote_handle), 0);
+  }
+
   // Binds this AssociatedReceiver by consuming |pending_receiver|. Must only be
   // called on an unbound AssociatedReceiver.
   //
@@ -186,12 +218,13 @@ class AssociatedReceiver {
     return PendingAssociatedReceiver<Interface>(binding_.Unbind().PassHandle());
   }
 
-  // Adds a message filter to be notified of each incoming message before
+  // Sets a message filter to be notified of each incoming message before
   // dispatch. If a filter returns |false| from Accept(), the message is not
-  // dispatched and the pipe is closed. Filters cannot be removed once added.
-  void AddFilter(std::unique_ptr<MessageReceiver> filter) {
+  // dispatched and the pipe is closed. Filters cannot be removed once added
+  // and only one can be set.
+  void SetFilter(std::unique_ptr<MessageFilter> filter) {
     DCHECK(is_bound());
-    binding_.AddFilter(std::move(filter));
+    binding_.SetFilter(std::move(filter));
   }
 
   // Sends a message on the underlying message pipe and runs the current
@@ -199,6 +232,14 @@ class AssociatedReceiver {
   // verify that no message was sent on a message pipe in response to some
   // stimulus.
   void FlushForTesting() { binding_.FlushForTesting(); }
+
+  // Returns the interface implementation that was previously specified.
+  Interface* impl() { return binding_.impl(); }
+
+  // Allows test code to swap the interface implementation.
+  ImplPointerType SwapImplForTesting(ImplPointerType new_impl) {
+    return binding_.SwapImplForTesting(new_impl);
+  }
 
  private:
   // TODO(https://crbug.com/875030): Move AssociatedBinding details into this

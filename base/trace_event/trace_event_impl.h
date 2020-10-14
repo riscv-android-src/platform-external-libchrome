@@ -51,28 +51,6 @@ struct TraceEventHandle {
   unsigned event_index : 6;
 };
 
-
-// libchrome has trace disabled. TraceEvent is a stub implementation for real
-// TraceEvent below.
-#if 1
-
-class TraceEvent {
- public:
-  using TraceValue = base::trace_event::TraceValue;
-  TraceEvent() = default;
-  TraceEvent(int, TimeTicks, ThreadTicks, ThreadInstructionCount, char,
-             const unsigned char *, const char *, const char *,
-             unsigned long long, unsigned long long, TraceArguments *,
-             unsigned int) {}
-  ~TraceEvent() = default;
-
-  void AppendAsJSON(std::string*, const ArgumentFilterPredicate&) const {}
-
-  static void AppendValueAsJSON(unsigned char, TraceValue, std::string*) {}
-};
-
-#else
-
 class BASE_EXPORT TraceEvent {
  public:
   // TODO(898794): Remove once all users have been updated.
@@ -133,13 +111,6 @@ class BASE_EXPORT TraceEvent {
       std::string* out,
       const ArgumentFilterPredicate& argument_filter_predicate) const;
   void AppendPrettyPrinted(std::ostringstream* out) const;
-
-  // TODO(898794): Remove once caller has been updated.
-  static void AppendValueAsJSON(unsigned char type,
-                                TraceValue value,
-                                std::string* out) {
-    value.AppendAsJSON(type, out);
-  }
 
   TimeTicks timestamp() const { return timestamp_; }
   ThreadTicks thread_timestamp() const { return thread_timestamp_; }
@@ -221,7 +192,6 @@ class BASE_EXPORT TraceEvent {
 
   DISALLOW_COPY_AND_ASSIGN(TraceEvent);
 };
-#endif
 
 }  // namespace trace_event
 }  // namespace base

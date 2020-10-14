@@ -1,0 +1,2180 @@
+From 15a4f2ff0673cf9df61f787e14106c9654553178 Mon Sep 17 00:00:00 2001
+From: Qijiang Fan <fqj@chromium.org>
+Date: Mon, 12 Oct 2020 14:33:47 +0900
+Subject: [PATCH] Revert "Reland "[base] Remove base::SharedMemory and
+ base::SharedMemoryHandle""
+
+This reverts commit 83130356d50dddd5d1a388901693f3b07a7ca045.
+
+Change-Id: I8a601b65d88f62579492b762b2142974ae5293c2
+---
+ BUILD.gn                                    |   4 +
+ base/memory/shared_memory.h                 | 213 ++++++
+ base/memory/shared_memory_android.cc        |  66 ++
+ base/memory/shared_memory_handle.cc         |  23 +
+ base/memory/shared_memory_handle.h          | 229 ++++++
+ base/memory/shared_memory_handle_android.cc | 115 +++
+ base/memory/shared_memory_handle_posix.cc   |  71 ++
+ base/memory/shared_memory_helper.cc         | 152 ++++
+ base/memory/shared_memory_helper.h          |  36 +
+ base/memory/shared_memory_posix.cc          | 255 +++++++
+ base/memory/shared_memory_tracker.cc        |  26 +
+ base/memory/shared_memory_tracker.h         |   8 +
+ base/memory/shared_memory_unittest.cc       | 748 ++++++++++++++++++++
+ base/metrics/persistent_memory_allocator.cc |   1 +
+ base/test/test_shared_memory_util.cc        |  13 +
+ base/test/test_shared_memory_util.h         |  10 +-
+ 16 files changed, 1967 insertions(+), 3 deletions(-)
+ create mode 100644 base/memory/shared_memory.h
+ create mode 100644 base/memory/shared_memory_android.cc
+ create mode 100644 base/memory/shared_memory_handle.cc
+ create mode 100644 base/memory/shared_memory_handle.h
+ create mode 100644 base/memory/shared_memory_handle_android.cc
+ create mode 100644 base/memory/shared_memory_handle_posix.cc
+ create mode 100644 base/memory/shared_memory_helper.cc
+ create mode 100644 base/memory/shared_memory_helper.h
+ create mode 100644 base/memory/shared_memory_posix.cc
+ create mode 100644 base/memory/shared_memory_unittest.cc
+
+diff --git a/BUILD.gn b/BUILD.gn
+index d48cd9913aa7..3d112be670e2 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -152,6 +152,10 @@ libbase_sublibs = [
+       "base/location.cc",
+       "base/logging.cc",
+       "base/memory/aligned_memory.cc",
++      "base/memory/shared_memory_handle.cc",
++      "base/memory/shared_memory_handle_posix.cc",
++      "base/memory/shared_memory_posix.cc",
++      "base/memory/shared_memory_helper.cc",
+       "base/memory/platform_shared_memory_region.cc",
+       "base/memory/platform_shared_memory_region_posix.cc",
+       "base/memory/read_only_shared_memory_region.cc",
+diff --git a/base/memory/shared_memory.h b/base/memory/shared_memory.h
+new file mode 100644
+index 000000000000..97a91158ef0c
+--- /dev/null
++++ b/base/memory/shared_memory.h
+@@ -0,0 +1,215 @@
++// Copyright (c) 2012 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_MEMORY_SHARED_MEMORY_H_
++#define BASE_MEMORY_SHARED_MEMORY_H_
++
++#include <stddef.h>
++
++#include <string>
++
++#include "base/base_export.h"
++#include "base/hash/hash.h"
++#include "base/macros.h"
++#include "base/memory/shared_memory_handle.h"
++#include "base/process/process_handle.h"
++#include "base/strings/string16.h"
++#include "build/build_config.h"
++
++#if defined(OS_POSIX) || defined(OS_FUCHSIA)
++#include <stdio.h>
++#include <sys/types.h>
++#include <semaphore.h>
++#include "base/file_descriptor_posix.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_file.h"
++#endif
++
++#if defined(OS_WIN)
++#include "base/win/scoped_handle.h"
++#endif
++
++namespace mri {
++class SharedMemoryProvider;
++class VideoFrameHandlerImpl;
++class ProducerImpl;
++}
++
++namespace base {
++
++class FilePath;
++class SharedMemoryTracker;
++
++// Options for creating a shared memory object.
++struct BASE_EXPORT SharedMemoryCreateOptions {
++  // Size of the shared memory object to be created.
++  // When opening an existing object, this has no effect.
++  size_t size = 0;
++
++  // If true, mappings might need to be made executable later.
++  bool executable = false;
++
++  // If true, the file can be shared read-only to a process.
++  bool share_read_only = false;
++};
++
++// Platform abstraction for shared memory.
++// SharedMemory consumes a SharedMemoryHandle [potentially one that it created]
++// to map a shared memory OS resource into the virtual address space of the
++// current process.
++//
++// DEPRECATED - Use {Writable,ReadOnly}SharedMemoryRegion instead.
++// http://crbug.com/795291
++class BASE_EXPORT SharedMemory {
++ public:
++  // Closes any open files.
++  ~SharedMemory();
++
++ private:
++  SharedMemory();
++  friend class mri::SharedMemoryProvider;
++  friend class mri::VideoFrameHandlerImpl;
++  friend class mri::ProducerImpl;
++  friend class SharedMemoryTracker;
++
++#if defined(OS_WIN)
++  // Similar to the default constructor, except that this allows for
++  // calling LockDeprecated() to acquire the named mutex before either Create or
++  // Open are called on Windows.
++  explicit SharedMemory(const string16& name);
++#endif
++
++  // Create a new SharedMemory object from an existing, open
++  // shared memory file.
++  //
++  // WARNING: This does not reduce the OS-level permissions on the handle; it
++  // only affects how the SharedMemory will be mmapped. Use
++  // GetReadOnlyHandle to drop permissions. TODO(jln,jyasskin): DCHECK
++  // that |read_only| matches the permissions of the handle.
++  SharedMemory(const SharedMemoryHandle& handle, bool read_only);
++
++  // Return true iff the given handle is valid (i.e. not the distingished
++  // invalid value; NULL for a HANDLE and -1 for a file descriptor)
++  static bool IsHandleValid(const SharedMemoryHandle& handle);
++
++  // Closes a shared memory handle.
++  static void CloseHandle(const SharedMemoryHandle& handle);
++
++  // Duplicates The underlying OS primitive. Returns an invalid handle on
++  // failure. The caller is responsible for destroying the duplicated OS
++  // primitive.
++  static SharedMemoryHandle DuplicateHandle(const SharedMemoryHandle& handle);
++
++#if defined(OS_POSIX) && !(defined(OS_MACOSX) && !defined(OS_IOS))
++  // This method requires that the SharedMemoryHandle is backed by a POSIX fd.
++  static int GetFdFromSharedMemoryHandle(const SharedMemoryHandle& handle);
++#endif
++
++  // Creates a shared memory object as described by the options struct.
++  // Returns true on success and false on failure.
++  bool Create(const SharedMemoryCreateOptions& options);
++
++  // Creates and maps an anonymous shared memory segment of size size.
++  // Returns true on success and false on failure.
++  bool CreateAndMapAnonymous(size_t size);
++
++  // Creates an anonymous shared memory segment of size size.
++  // Returns true on success and false on failure.
++  bool CreateAnonymous(size_t size) {
++    SharedMemoryCreateOptions options;
++    options.size = size;
++    return Create(options);
++  }
++
++  // Maps the shared memory into the caller's address space.
++  // Returns true on success, false otherwise.  The memory address
++  // is accessed via the memory() accessor.  The mapped address is guaranteed to
++  // have an alignment of at least MAP_MINIMUM_ALIGNMENT. This method will fail
++  // if this object is currently mapped.
++  bool Map(size_t bytes) {
++    return MapAt(0, bytes);
++  }
++
++  // Same as above, but with |offset| to specify from begining of the shared
++  // memory block to map.
++  // |offset| must be alignent to value of |SysInfo::VMAllocationGranularity()|.
++  bool MapAt(off_t offset, size_t bytes);
++  enum { MAP_MINIMUM_ALIGNMENT = 32 };
++
++  // Unmaps the shared memory from the caller's address space.
++  // Returns true if successful; returns false on error or if the
++  // memory is not mapped.
++  bool Unmap();
++
++  // The size requested when the map is first created.
++  size_t requested_size() const { return requested_size_; }
++
++  // The actual size of the mapped memory (may be larger than requested).
++  size_t mapped_size() const { return mapped_size_; }
++
++  // Gets a pointer to the opened memory space if it has been
++  // Mapped via Map().  Returns NULL if it is not mapped.
++  void* memory() const { return memory_; }
++
++  // Returns the underlying OS handle for this segment.
++  // Use of this handle for anything other than an opaque
++  // identifier is not portable.
++  SharedMemoryHandle handle() const;
++
++  // Returns the underlying OS handle for this segment. The caller takes
++  // ownership of the handle and memory is unmapped. This is equivalent to
++  // duplicating the handle and then calling Unmap() and Close() on this object,
++  // without the overhead of duplicating the handle.
++  SharedMemoryHandle TakeHandle();
++
++  // Closes the open shared memory segment. The memory will remain mapped if
++  // it was previously mapped.
++  // It is safe to call Close repeatedly.
++  void Close();
++
++  // Returns a read-only handle to this shared memory region. The caller takes
++  // ownership of the handle. For POSIX handles, CHECK-fails if the region
++  // wasn't Created or Opened with share_read_only=true, which is required to
++  // make the handle read-only. When the handle is passed to the IPC subsystem,
++  // that takes ownership of the handle. As such, it's not valid to pass the
++  // sample handle to the IPC subsystem twice. Returns an invalid handle on
++  // failure.
++  SharedMemoryHandle GetReadOnlyHandle() const;
++
++  // Returns an ID for the mapped region. This is ID of the SharedMemoryHandle
++  // that was mapped. The ID is valid even after the SharedMemoryHandle is
++  // Closed, as long as the region is not unmapped.
++  const UnguessableToken& mapped_id() const { return mapped_id_; }
++
++ private:
++#if defined(OS_POSIX) && !defined(OS_NACL) && !defined(OS_ANDROID) && \
++    (!defined(OS_MACOSX) || defined(OS_IOS))
++  bool FilePathForMemoryName(const std::string& mem_name, FilePath* path);
++#endif
++
++#if defined(OS_WIN)
++  // If true indicates this came from an external source so needs extra checks
++  // before being mapped.
++  bool external_section_ = false;
++#elif !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
++  // If valid, points to the same memory region as shm_, but with readonly
++  // permissions.
++  SharedMemoryHandle readonly_shm_;
++#endif
++
++  // The OS primitive that backs the shared memory region.
++  SharedMemoryHandle shm_;
++
++  size_t mapped_size_ = 0;
++  void* memory_ = nullptr;
++  bool read_only_ = false;
++  size_t requested_size_ = 0;
++  base::UnguessableToken mapped_id_;
++
++  DISALLOW_COPY_AND_ASSIGN(SharedMemory);
++};
++
++}  // namespace base
++
++#endif  // BASE_MEMORY_SHARED_MEMORY_H_
+diff --git a/base/memory/shared_memory_android.cc b/base/memory/shared_memory_android.cc
+new file mode 100644
+index 000000000000..04e4bc2dfdce
+--- /dev/null
++++ b/base/memory/shared_memory_android.cc
+@@ -0,0 +1,66 @@
++// Copyright (c) 2011 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/memory/shared_memory.h"
++
++#include <stddef.h>
++#include <sys/mman.h>
++
++#include "base/bits.h"
++#include "base/logging.h"
++#include "base/process/process_metrics.h"
++#include "third_party/ashmem/ashmem.h"
++
++namespace base {
++
++// For Android, we use ashmem to implement SharedMemory. ashmem_create_region
++// will automatically pin the region. We never explicitly call pin/unpin. When
++// all the file descriptors from different processes associated with the region
++// are closed, the memory buffer will go away.
++
++bool SharedMemory::Create(const SharedMemoryCreateOptions& options) {
++  DCHECK(!shm_.IsValid());
++
++  // Align size as required by ashmem_create_region() API documentation.
++  size_t rounded_size = bits::Align(options.size, GetPageSize());
++
++  if (rounded_size > static_cast<size_t>(std::numeric_limits<int>::max()))
++    return false;
++
++  // "name" is just a label in ashmem. It is visible in /proc/pid/maps.
++  int fd = ashmem_create_region("", rounded_size);
++  shm_ = SharedMemoryHandle::ImportHandle(fd, options.size);
++  if (!shm_.IsValid()) {
++    DLOG(ERROR) << "Shared memory creation failed";
++    return false;
++  }
++
++  int flags = PROT_READ | PROT_WRITE | (options.executable ? PROT_EXEC : 0);
++  int err = ashmem_set_prot_region(shm_.GetHandle(), flags);
++  if (err < 0) {
++    DLOG(ERROR) << "Error " << err << " when setting protection of ashmem";
++    return false;
++  }
++
++  requested_size_ = options.size;
++
++  return true;
++}
++
++void SharedMemory::Close() {
++  if (shm_.IsValid()) {
++    shm_.Close();
++    shm_ = SharedMemoryHandle();
++  }
++}
++
++SharedMemoryHandle SharedMemory::GetReadOnlyHandle() const {
++  // There are no read-only Ashmem descriptors on Android.
++  // Instead, the protection mask is a property of the region itself.
++  SharedMemoryHandle handle = shm_.Duplicate();
++  handle.SetReadOnly();
++  return handle;
++}
++
++}  // namespace base
+diff --git a/base/memory/shared_memory_handle.cc b/base/memory/shared_memory_handle.cc
+new file mode 100644
+index 000000000000..085bde46c295
+--- /dev/null
++++ b/base/memory/shared_memory_handle.cc
+@@ -0,0 +1,23 @@
++// Copyright 2017 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/memory/shared_memory_handle.h"
++
++namespace base {
++
++SharedMemoryHandle::SharedMemoryHandle(const SharedMemoryHandle& handle) =
++    default;
++
++SharedMemoryHandle& SharedMemoryHandle::operator=(
++    const SharedMemoryHandle& handle) = default;
++
++base::UnguessableToken SharedMemoryHandle::GetGUID() const {
++  return guid_;
++}
++
++size_t SharedMemoryHandle::GetSize() const {
++  return size_;
++}
++
++}  // namespace base
+diff --git a/base/memory/shared_memory_handle.h b/base/memory/shared_memory_handle.h
+new file mode 100644
+index 000000000000..78f82f4d4a3a
+--- /dev/null
++++ b/base/memory/shared_memory_handle.h
+@@ -0,0 +1,229 @@
++// Copyright 2015 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_MEMORY_SHARED_MEMORY_HANDLE_H_
++#define BASE_MEMORY_SHARED_MEMORY_HANDLE_H_
++
++#include <stddef.h>
++
++#include "base/unguessable_token.h"
++#include "build/build_config.h"
++
++#if defined(OS_WIN)
++#include "base/process/process_handle.h"
++#include "base/win/windows_types.h"
++#elif defined(OS_MACOSX) && !defined(OS_IOS)
++#include <mach/mach.h>
++#include "base/base_export.h"
++#include "base/macros.h"
++#include "base/process/process_handle.h"
++#elif defined(OS_POSIX)
++#include <sys/types.h>
++#include "base/file_descriptor_posix.h"
++#elif defined(OS_FUCHSIA)
++#include <zircon/types.h>
++#endif
++
++namespace mri {
++class SharedMemoryProvider;
++}
++
++namespace base {
++
++// SharedMemoryHandle is the smallest possible IPC-transportable "reference" to
++// a shared memory OS resource. A "reference" can be consumed exactly once [by
++// base::SharedMemory] to map the shared memory OS resource into the virtual
++// address space of the current process.
++// TODO(erikchen): This class should have strong ownership semantics to prevent
++// leaks of the underlying OS resource. https://crbug.com/640840.
++//
++// DEPRECATED - Use {Writable,ReadOnly}SharedMemoryRegion instead.
++// http://crbug.com/795291
++class BASE_EXPORT SharedMemoryHandle {
++ private:
++  // The default constructor returns an invalid SharedMemoryHandle.
++  SharedMemoryHandle();
++  friend class mri::SharedMemoryProvider;
++  friend class SharedMemory;
++
++  // Standard copy constructor. The new instance shares the underlying OS
++  // primitives.
++  SharedMemoryHandle(const SharedMemoryHandle& handle);
++
++  // Standard assignment operator. The updated instance shares the underlying
++  // OS primitives.
++  SharedMemoryHandle& operator=(const SharedMemoryHandle& handle);
++
++  // Closes the underlying OS resource.
++  // The fact that this method needs to be "const" is an artifact of the
++  // original interface for base::SharedMemory::CloseHandle.
++  // TODO(erikchen): This doesn't clear the underlying reference, which seems
++  // like a bug, but is how this class has always worked. Fix this:
++  // https://crbug.com/716072.
++  void Close() const;
++
++  // Whether ownership of the underlying OS resource is implicitly passed to
++  // the IPC subsystem during serialization.
++  void SetOwnershipPassesToIPC(bool ownership_passes);
++  bool OwnershipPassesToIPC() const;
++
++  // Whether the underlying OS resource is valid.
++  bool IsValid() const;
++
++  // Duplicates the underlying OS resource. Using the return value as a
++  // parameter to an IPC message will cause the IPC subsystem to consume the OS
++  // resource.
++  SharedMemoryHandle Duplicate() const;
++
++  // Uniques identifies the shared memory region that the underlying OS resource
++  // points to. Multiple SharedMemoryHandles that point to the same shared
++  // memory region will have the same GUID. Preserved across IPC.
++  base::UnguessableToken GetGUID() const;
++
++  // Returns the size of the memory region that SharedMemoryHandle points to.
++  size_t GetSize() const;
++
++#if defined(OS_WIN)
++  // Takes implicit ownership of |h|.
++  // |guid| uniquely identifies the shared memory region pointed to by the
++  // underlying OS resource. If the HANDLE is associated with another
++  // SharedMemoryHandle, the caller must pass the |guid| of that
++  // SharedMemoryHandle. Otherwise, the caller should generate a new
++  // UnguessableToken.
++  // Passing the wrong |size| has no immediate consequence, but may cause errors
++  // when trying to map the SharedMemoryHandle at a later point in time.
++  SharedMemoryHandle(HANDLE h, size_t size, const base::UnguessableToken& guid);
++  HANDLE GetHandle() const;
++#elif defined(OS_FUCHSIA)
++  // Takes implicit ownership of |h|.
++  // |guid| uniquely identifies the shared memory region pointed to by the
++  // underlying OS resource. If the zx_handle_t is associated with another
++  // SharedMemoryHandle, the caller must pass the |guid| of that
++  // SharedMemoryHandle. Otherwise, the caller should generate a new
++  // UnguessableToken.
++  // Passing the wrong |size| has no immediate consequence, but may cause errors
++  // when trying to map the SharedMemoryHandle at a later point in time.
++  SharedMemoryHandle(zx_handle_t h,
++                     size_t size,
++                     const base::UnguessableToken& guid);
++  zx_handle_t GetHandle() const;
++#elif defined(OS_MACOSX) && !defined(OS_IOS)
++  // Makes a Mach-based SharedMemoryHandle of the given size. On error,
++  // subsequent calls to IsValid() return false.
++  // Passing the wrong |size| has no immediate consequence, but may cause errors
++  // when trying to map the SharedMemoryHandle at a later point in time.
++  SharedMemoryHandle(mach_vm_size_t size, const base::UnguessableToken& guid);
++
++  // Makes a Mach-based SharedMemoryHandle from |memory_object|, a named entry
++  // in the current task. The memory region has size |size|.
++  // Passing the wrong |size| has no immediate consequence, but may cause errors
++  // when trying to map the SharedMemoryHandle at a later point in time.
++  SharedMemoryHandle(mach_port_t memory_object,
++                     mach_vm_size_t size,
++                     const base::UnguessableToken& guid);
++
++  // Exposed so that the SharedMemoryHandle can be transported between
++  // processes.
++  mach_port_t GetMemoryObject() const;
++
++  // The SharedMemoryHandle must be valid.
++  // Returns whether the SharedMemoryHandle was successfully mapped into memory.
++  // On success, |memory| is an output variable that contains the start of the
++  // mapped memory.
++  bool MapAt(off_t offset, size_t bytes, void** memory, bool read_only);
++#elif defined(OS_POSIX)
++  // Creates a SharedMemoryHandle from an |fd| supplied from an external
++  // service.
++  // Passing the wrong |size| has no immediate consequence, but may cause errors
++  // when trying to map the SharedMemoryHandle at a later point in time.
++  static SharedMemoryHandle ImportHandle(int fd, size_t size);
++
++  // Returns the underlying OS resource.
++  int GetHandle() const;
++
++  // Invalidates [but doesn't close] the underlying OS resource. This will leak
++  // unless the caller is careful.
++  int Release();
++#endif
++
++#if defined(OS_ANDROID)
++  // Marks the current file descriptor as read-only, for the purpose of
++  // mapping. This is independent of the region's read-only status.
++  void SetReadOnly() { read_only_ = true; }
++
++  // Returns true iff the descriptor is to be used for read-only
++  // mappings.
++  bool IsReadOnly() const { return read_only_; }
++
++  // Returns true iff the corresponding region is read-only.
++  bool IsRegionReadOnly() const;
++
++  // Try to set the region read-only. This will fail any future attempt
++  // at read-write mapping.
++  bool SetRegionReadOnly() const;
++#endif
++
++#if defined(OS_POSIX) && !(defined(OS_MACOSX) && !defined(OS_IOS))
++  // Constructs a SharedMemoryHandle backed by a FileDescriptor. The newly
++  // created instance has the same ownership semantics as base::FileDescriptor.
++  // This typically means that the SharedMemoryHandle takes ownership of the
++  // |fd| if |auto_close| is true. Unfortunately, it's common for existing code
++  // to make shallow copies of SharedMemoryHandle, and the one that is finally
++  // passed into a base::SharedMemory is the one that "consumes" the fd.
++  //
++  // |guid| uniquely identifies the shared memory region pointed to by the
++  // underlying OS resource. If |file_descriptor| is associated with another
++  // SharedMemoryHandle, the caller must pass the |guid| of that
++  // SharedMemoryHandle. Otherwise, the caller should generate a new
++  // UnguessableToken.
++  // Passing the wrong |size| has no immediate consequence, but may cause errors
++  // when trying to map the SharedMemoryHandle at a later point in time.
++  SharedMemoryHandle(const base::FileDescriptor& file_descriptor,
++                     size_t size,
++                     const base::UnguessableToken& guid);
++#endif
++
++ private:
++#if defined(OS_WIN)
++  HANDLE handle_ = nullptr;
++
++  // Whether passing this object as a parameter to an IPC message passes
++  // ownership of |handle_| to the IPC stack. This is meant to mimic the
++  // behavior of the |auto_close| parameter of FileDescriptor. This member only
++  // affects attachment-brokered SharedMemoryHandles.
++  // Defaults to |false|.
++  bool ownership_passes_to_ipc_ = false;
++#elif defined(OS_FUCHSIA)
++  zx_handle_t handle_ = ZX_HANDLE_INVALID;
++  bool ownership_passes_to_ipc_ = false;
++#elif defined(OS_MACOSX) && !defined(OS_IOS)
++  friend class SharedMemory;
++  friend bool CheckReadOnlySharedMemoryHandleForTesting(
++      SharedMemoryHandle handle);
++
++  mach_port_t memory_object_ = MACH_PORT_NULL;
++
++  // Whether passing this object as a parameter to an IPC message passes
++  // ownership of |memory_object_| to the IPC stack. This is meant to mimic
++  // the behavior of the |auto_close| parameter of FileDescriptor.
++  // Defaults to |false|.
++  bool ownership_passes_to_ipc_ = false;
++#elif defined(OS_ANDROID)
++  friend class SharedMemory;
++
++  FileDescriptor file_descriptor_;
++  bool read_only_ = false;
++#elif defined(OS_POSIX)
++  FileDescriptor file_descriptor_;
++#endif
++
++  base::UnguessableToken guid_;
++
++  // The size of the region referenced by the SharedMemoryHandle.
++  size_t size_ = 0;
++};
++
++}  // namespace base
++
++#endif  // BASE_MEMORY_SHARED_MEMORY_HANDLE_H_
+diff --git a/base/memory/shared_memory_handle_android.cc b/base/memory/shared_memory_handle_android.cc
+new file mode 100644
+index 000000000000..1b615353bfe5
+--- /dev/null
++++ b/base/memory/shared_memory_handle_android.cc
+@@ -0,0 +1,115 @@
++// Copyright 2017 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/memory/shared_memory_handle.h"
++
++#include <sys/mman.h>
++#include <unistd.h>
++
++#include "base/logging.h"
++#include "base/posix/eintr_wrapper.h"
++#include "base/posix/unix_domain_socket.h"
++#include "base/unguessable_token.h"
++#include "third_party/ashmem/ashmem.h"
++
++namespace base {
++
++static int GetAshmemRegionProtectionMask(int fd) {
++  int prot = ashmem_get_prot_region(fd);
++  if (prot < 0) {
++    DPLOG(ERROR) << "ashmem_get_prot_region";
++    return -1;
++  }
++  return prot;
++}
++
++SharedMemoryHandle::SharedMemoryHandle() = default;
++
++SharedMemoryHandle::SharedMemoryHandle(
++    const base::FileDescriptor& file_descriptor,
++    size_t size,
++    const base::UnguessableToken& guid)
++    : guid_(guid), size_(size) {
++  DCHECK_GE(file_descriptor.fd, 0);
++  file_descriptor_ = file_descriptor;
++}
++
++// static
++SharedMemoryHandle SharedMemoryHandle::ImportHandle(int fd, size_t size) {
++  SharedMemoryHandle handle;
++  handle.file_descriptor_.fd = fd;
++  handle.file_descriptor_.auto_close = false;
++  handle.guid_ = UnguessableToken::Create();
++  handle.size_ = size;
++  return handle;
++}
++
++int SharedMemoryHandle::GetHandle() const {
++  DCHECK(IsValid());
++  return file_descriptor_.fd;
++}
++
++bool SharedMemoryHandle::IsValid() const {
++  return file_descriptor_.fd >= 0;
++}
++
++void SharedMemoryHandle::Close() const {
++  DCHECK(IsValid());
++  if (IGNORE_EINTR(close(file_descriptor_.fd)) < 0)
++    PLOG(ERROR) << "close";
++}
++
++int SharedMemoryHandle::Release() {
++  int old_fd = file_descriptor_.fd;
++  file_descriptor_.fd = -1;
++  return old_fd;
++}
++
++SharedMemoryHandle SharedMemoryHandle::Duplicate() const {
++  DCHECK(IsValid());
++  SharedMemoryHandle result;
++  int duped_handle = HANDLE_EINTR(dup(file_descriptor_.fd));
++  if (duped_handle >= 0) {
++    result = SharedMemoryHandle(FileDescriptor(duped_handle, true), GetSize(),
++                                GetGUID());
++    if (IsReadOnly())
++      result.SetReadOnly();
++  }
++  return result;
++}
++
++void SharedMemoryHandle::SetOwnershipPassesToIPC(bool ownership_passes) {
++  file_descriptor_.auto_close = ownership_passes;
++}
++
++bool SharedMemoryHandle::OwnershipPassesToIPC() const {
++  return file_descriptor_.auto_close;
++}
++
++bool SharedMemoryHandle::IsRegionReadOnly() const {
++  int prot = GetAshmemRegionProtectionMask(file_descriptor_.fd);
++  return (prot >= 0 && (prot & PROT_WRITE) == 0);
++}
++
++bool SharedMemoryHandle::SetRegionReadOnly() const {
++  int fd = file_descriptor_.fd;
++  int prot = GetAshmemRegionProtectionMask(fd);
++  if (prot < 0)
++    return false;
++
++  if ((prot & PROT_WRITE) == 0) {
++    // Region is already read-only.
++    return true;
++  }
++
++  prot &= ~PROT_WRITE;
++  int ret = ashmem_set_prot_region(fd, prot);
++  if (ret != 0) {
++    DPLOG(ERROR) << "ashmem_set_prot_region";
++    return false;
++  }
++  return true;
++}
++
++}  // namespace base
+diff --git a/base/memory/shared_memory_handle_posix.cc b/base/memory/shared_memory_handle_posix.cc
+new file mode 100644
+index 000000000000..09dfb9ca8b15
+--- /dev/null
++++ b/base/memory/shared_memory_handle_posix.cc
+@@ -0,0 +1,71 @@
++// Copyright 2017 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/memory/shared_memory_handle.h"
++
++#include <unistd.h>
++
++#include "base/logging.h"
++#include "base/posix/eintr_wrapper.h"
++#include "base/unguessable_token.h"
++
++namespace base {
++
++SharedMemoryHandle::SharedMemoryHandle() = default;
++
++SharedMemoryHandle::SharedMemoryHandle(
++    const base::FileDescriptor& file_descriptor,
++    size_t size,
++    const base::UnguessableToken& guid)
++    : file_descriptor_(file_descriptor), guid_(guid), size_(size) {}
++
++// static
++SharedMemoryHandle SharedMemoryHandle::ImportHandle(int fd, size_t size) {
++  SharedMemoryHandle handle;
++  handle.file_descriptor_.fd = fd;
++  handle.file_descriptor_.auto_close = false;
++  handle.guid_ = UnguessableToken::Create();
++  handle.size_ = size;
++  return handle;
++}
++
++int SharedMemoryHandle::GetHandle() const {
++  return file_descriptor_.fd;
++}
++
++bool SharedMemoryHandle::IsValid() const {
++  return file_descriptor_.fd >= 0;
++}
++
++void SharedMemoryHandle::Close() const {
++  if (IGNORE_EINTR(close(file_descriptor_.fd)) < 0)
++    PLOG(ERROR) << "close";
++}
++
++int SharedMemoryHandle::Release() {
++  int old_fd = file_descriptor_.fd;
++  file_descriptor_.fd = -1;
++  return old_fd;
++}
++
++SharedMemoryHandle SharedMemoryHandle::Duplicate() const {
++  if (!IsValid())
++    return SharedMemoryHandle();
++
++  int duped_handle = HANDLE_EINTR(dup(file_descriptor_.fd));
++  if (duped_handle < 0)
++    return SharedMemoryHandle();
++  return SharedMemoryHandle(FileDescriptor(duped_handle, true), GetSize(),
++                            GetGUID());
++}
++
++void SharedMemoryHandle::SetOwnershipPassesToIPC(bool ownership_passes) {
++  file_descriptor_.auto_close = ownership_passes;
++}
++
++bool SharedMemoryHandle::OwnershipPassesToIPC() const {
++  return file_descriptor_.auto_close;
++}
++
++}  // namespace base
+diff --git a/base/memory/shared_memory_helper.cc b/base/memory/shared_memory_helper.cc
+new file mode 100644
+index 000000000000..af200b654bbe
+--- /dev/null
++++ b/base/memory/shared_memory_helper.cc
+@@ -0,0 +1,152 @@
++// Copyright 2016 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/memory/shared_memory_helper.h"
++
++#if defined(OS_CHROMEOS)
++#include <sys/resource.h>
++#include <sys/time.h>
++
++#include "base/debug/alias.h"
++#endif  // defined(OS_CHROMEOS)
++
++#include "base/stl_util.h"
++#include "base/threading/thread_restrictions.h"
++
++namespace base {
++
++struct ScopedPathUnlinkerTraits {
++  static const FilePath* InvalidValue() { return nullptr; }
++
++  static void Free(const FilePath* path) {
++    if (unlink(path->value().c_str()))
++      PLOG(WARNING) << "unlink";
++  }
++};
++
++// Unlinks the FilePath when the object is destroyed.
++using ScopedPathUnlinker =
++    ScopedGeneric<const FilePath*, ScopedPathUnlinkerTraits>;
++
++#if !defined(OS_ANDROID)
++bool CreateAnonymousSharedMemory(const SharedMemoryCreateOptions& options,
++                                 ScopedFD* fd,
++                                 ScopedFD* readonly_fd,
++                                 FilePath* path) {
++  // Q: Why not use the shm_open() etc. APIs?
++  // A: Because they're limited to 4mb on OS X.  FFFFFFFUUUUUUUUUUU
++  FilePath directory;
++  ScopedPathUnlinker path_unlinker;
++  if (!GetShmemTempDir(options.executable, &directory))
++    return false;
++
++  *fd = base::CreateAndOpenFdForTemporaryFileInDir(directory, path);
++  if (!fd->is_valid())
++    return false;
++
++  // Deleting the file prevents anyone else from mapping it in (making it
++  // private), and prevents the need for cleanup (once the last fd is
++  // closed, it is truly freed).
++  path_unlinker.reset(path);
++
++  if (options.share_read_only) {
++    // Also open as readonly so that we can GetReadOnlyHandle.
++    readonly_fd->reset(HANDLE_EINTR(open(path->value().c_str(), O_RDONLY)));
++    if (!readonly_fd->is_valid()) {
++      DPLOG(ERROR) << "open(\"" << path->value() << "\", O_RDONLY) failed";
++      fd->reset();
++      return false;
++    }
++  }
++  return true;
++}
++
++bool PrepareMapFile(ScopedFD fd,
++                    ScopedFD readonly_fd,
++                    int* mapped_file,
++                    int* readonly_mapped_file) {
++  DCHECK_EQ(-1, *mapped_file);
++  DCHECK_EQ(-1, *readonly_mapped_file);
++  if (!fd.is_valid())
++    return false;
++
++  // This function theoretically can block on the disk, but realistically
++  // the temporary files we create will just go into the buffer cache
++  // and be deleted before they ever make it out to disk.
++  base::ThreadRestrictions::ScopedAllowIO allow_io;
++
++  if (readonly_fd.is_valid()) {
++    struct stat st = {};
++    if (fstat(fd.get(), &st))
++      NOTREACHED();
++
++    struct stat readonly_st = {};
++    if (fstat(readonly_fd.get(), &readonly_st))
++      NOTREACHED();
++    if (st.st_dev != readonly_st.st_dev || st.st_ino != readonly_st.st_ino) {
++      LOG(ERROR) << "writable and read-only inodes don't match; bailing";
++      return false;
++    }
++  }
++
++  *mapped_file = HANDLE_EINTR(dup(fd.get()));
++  if (*mapped_file == -1) {
++    DPCHECK(false) << "dup failed";
++#if defined(OS_CHROMEOS)
++    if (errno == EMFILE) {
++      // We're out of file descriptors and are probably about to crash somewhere
++      // else in Chrome anyway. Let's collect what FD information we can and
++      // crash.
++      // Added for debugging crbug.com/733718
++      int original_fd_limit = 16384;
++      struct rlimit rlim;
++      if (getrlimit(RLIMIT_NOFILE, &rlim) == 0) {
++        original_fd_limit = rlim.rlim_cur;
++        if (rlim.rlim_max > rlim.rlim_cur) {
++          // Increase fd limit so breakpad has a chance to write a minidump.
++          rlim.rlim_cur = rlim.rlim_max;
++          if (setrlimit(RLIMIT_NOFILE, &rlim) != 0) {
++            PLOG(ERROR) << "setrlimit() failed";
++          }
++        }
++      } else {
++        PLOG(ERROR) << "getrlimit() failed";
++      }
++
++      const char kFileDataMarker[] = "FDATA";
++      char buf[PATH_MAX];
++      char fd_path[PATH_MAX];
++      char crash_buffer[32 * 1024] = {0};
++      char* crash_ptr = crash_buffer;
++      base::debug::Alias(crash_buffer);
++
++      // Put a marker at the start of our data so we can confirm where it
++      // begins.
++      crash_ptr = strncpy(crash_ptr, kFileDataMarker, strlen(kFileDataMarker));
++      for (int i = original_fd_limit; i >= 0; --i) {
++        memset(buf, 0, base::size(buf));
++        memset(fd_path, 0, base::size(fd_path));
++        snprintf(fd_path, base::size(fd_path) - 1, "/proc/self/fd/%d", i);
++        ssize_t count = readlink(fd_path, buf, base::size(buf) - 1);
++        if (count < 0) {
++          PLOG(ERROR) << "readlink failed for: " << fd_path;
++          continue;
++        }
++
++        if (crash_ptr + count + 1 < crash_buffer + base::size(crash_buffer)) {
++          crash_ptr = strncpy(crash_ptr, buf, count + 1);
++        }
++        LOG(ERROR) << i << ": " << buf;
++      }
++      LOG(FATAL) << "Logged for file descriptor exhaustion, crashing now";
++    }
++#endif  // defined(OS_CHROMEOS)
++  }
++  *readonly_mapped_file = readonly_fd.release();
++
++  return true;
++}
++#endif  // !defined(OS_ANDROID)
++
++}  // namespace base
+diff --git a/base/memory/shared_memory_helper.h b/base/memory/shared_memory_helper.h
+new file mode 100644
+index 000000000000..2c24f869f5c7
+--- /dev/null
++++ b/base/memory/shared_memory_helper.h
+@@ -0,0 +1,36 @@
++// Copyright 2016 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_MEMORY_SHARED_MEMORY_HELPER_H_
++#define BASE_MEMORY_SHARED_MEMORY_HELPER_H_
++
++#include "base/memory/shared_memory.h"
++#include "build/build_config.h"
++
++#include <fcntl.h>
++
++namespace base {
++
++#if !defined(OS_ANDROID)
++// Makes a temporary file, fdopens it, and then unlinks it. |fd| is populated
++// with the opened fd. |readonly_fd| is populated with the opened fd if
++// options.share_read_only is true. |path| is populated with the location of
++// the file before it was unlinked.
++// Returns false if there's an unhandled failure.
++bool CreateAnonymousSharedMemory(const SharedMemoryCreateOptions& options,
++                                 ScopedFD* fd,
++                                 ScopedFD* readonly_fd,
++                                 FilePath* path);
++
++// Takes the outputs of CreateAnonymousSharedMemory and maps them properly to
++// |mapped_file| or |readonly_mapped_file|, depending on which one is populated.
++bool PrepareMapFile(ScopedFD fd,
++                    ScopedFD readonly_fd,
++                    int* mapped_file,
++                    int* readonly_mapped_file);
++#endif  // !defined(OS_ANDROID)
++
++}  // namespace base
++
++#endif  // BASE_MEMORY_SHARED_MEMORY_HELPER_H_
+diff --git a/base/memory/shared_memory_posix.cc b/base/memory/shared_memory_posix.cc
+new file mode 100644
+index 000000000000..9f1b25046f02
+--- /dev/null
++++ b/base/memory/shared_memory_posix.cc
+@@ -0,0 +1,255 @@
++// Copyright (c) 2012 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/memory/shared_memory.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <stddef.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#include "base/files/scoped_file.h"
++#include "base/logging.h"
++#include "base/macros.h"
++#include "base/memory/shared_memory_helper.h"
++#include "base/memory/shared_memory_tracker.h"
++#include "base/posix/eintr_wrapper.h"
++#include "base/posix/safe_strerror.h"
++#include "base/process/process_metrics.h"
++#include "base/scoped_generic.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/threading/thread_restrictions.h"
++#include "base/trace_event/trace_event_stub.h"
++#include "base/unguessable_token.h"
++#include "build/build_config.h"
++
++#if defined(OS_ANDROID)
++#include "base/os_compat_android.h"
++#include "third_party/ashmem/ashmem.h"
++#endif
++
++#if defined(OS_MACOSX) && !defined(OS_IOS)
++#error "MacOS uses shared_memory_mac.cc"
++#endif
++
++namespace base {
++
++SharedMemory::SharedMemory() = default;
++
++SharedMemory::SharedMemory(const SharedMemoryHandle& handle, bool read_only)
++    : shm_(handle), read_only_(read_only) {}
++
++SharedMemory::~SharedMemory() {
++  Unmap();
++  Close();
++}
++
++// static
++bool SharedMemory::IsHandleValid(const SharedMemoryHandle& handle) {
++  return handle.IsValid();
++}
++
++// static
++void SharedMemory::CloseHandle(const SharedMemoryHandle& handle) {
++  DCHECK(handle.IsValid());
++  handle.Close();
++}
++
++// static
++SharedMemoryHandle SharedMemory::DuplicateHandle(
++    const SharedMemoryHandle& handle) {
++  return handle.Duplicate();
++}
++
++// static
++int SharedMemory::GetFdFromSharedMemoryHandle(
++    const SharedMemoryHandle& handle) {
++  return handle.GetHandle();
++}
++
++bool SharedMemory::CreateAndMapAnonymous(size_t size) {
++  return CreateAnonymous(size) && Map(size);
++}
++
++#if !defined(OS_ANDROID)
++
++// This SharedMemory API uses only the unique/private shmem.
++bool SharedMemory::Create(const SharedMemoryCreateOptions& options) {
++  DCHECK(!shm_.IsValid());
++  if (options.size == 0) return false;
++
++  if (options.size > static_cast<size_t>(std::numeric_limits<int>::max()))
++    return false;
++
++  // This function theoretically can block on the disk, but realistically
++  // the temporary files we create will just go into the buffer cache
++  // and be deleted before they ever make it out to disk.
++  ThreadRestrictions::ScopedAllowIO allow_io;
++
++  ScopedFD fd;
++  ScopedFD readonly_fd;
++  FilePath path;
++  if (!CreateAnonymousSharedMemory(options, &fd, &readonly_fd, &path))
++    return false;
++
++  if (fd.is_valid()) {
++    // Get current size.
++    struct stat stat;
++    if (fstat(fd.get(), &stat) != 0)
++      return false;
++    const size_t current_size = stat.st_size;
++    if (current_size != options.size) {
++#if defined(OS_LINUX)
++      // When /dev/shm becomes full, writing memory to a mapped region of
++      // shared memory causes a SIGBUS and kills the process. This is
++      // inconvenient to us because: (1) we'll get many different crash
++      // reports at random places that write to shared memory, and (2)
++      // process killed by SIGBUS confuses many developers. See
++      // crbug.com/1014296 for details.
++      //
++      // Here we preallocate memory by posix_fallocate and detect OOM (ENOSPC)
++      // early to avoid getting killed by SIGBUS.
++
++      // posix_fallocate doesn't use errno and returns the error number
++      // directly. Thus EINTR is handled manually.
++      int result;
++      do {
++        result = posix_fallocate(fd.get(), 0, options.size);
++        if (result != 0 && result != EINTR)
++          return false;
++      } while (result != 0);
++#else
++      if (HANDLE_EINTR(ftruncate(fd.get(), options.size)) != 0)
++        return false;
++#endif
++    }
++    requested_size_ = options.size;
++  } else {
++    PLOG(ERROR) << "Creating shared memory in " << path.value() << " failed";
++    FilePath dir = path.DirName();
++    if (access(dir.value().c_str(), W_OK | X_OK) < 0) {
++      PLOG(ERROR) << "Unable to access(W_OK|X_OK) " << dir.value();
++      if (dir.value() == "/dev/shm") {
++        LOG(FATAL) << "This is frequently caused by incorrect permissions on "
++                   << "/dev/shm.  Try 'sudo chmod 1777 /dev/shm' to fix.";
++      }
++    }
++    return false;
++  }
++
++  int mapped_file = -1;
++  int readonly_mapped_file = -1;
++
++  bool result = PrepareMapFile(std::move(fd), std::move(readonly_fd),
++                               &mapped_file, &readonly_mapped_file);
++  shm_ = SharedMemoryHandle(FileDescriptor(mapped_file, false), options.size,
++                            UnguessableToken::Create());
++  readonly_shm_ =
++      SharedMemoryHandle(FileDescriptor(readonly_mapped_file, false),
++                         options.size, shm_.GetGUID());
++  return result;
++}
++#endif  // !defined(OS_ANDROID)
++
++bool SharedMemory::MapAt(off_t offset, size_t bytes) {
++  if (!shm_.IsValid())
++    return false;
++
++  if (bytes > static_cast<size_t>(std::numeric_limits<int>::max()))
++    return false;
++
++  if (memory_)
++    return false;
++
++#if defined(OS_ANDROID)
++  // On Android, Map can be called with a size and offset of zero to use the
++  // ashmem-determined size.
++  if (bytes == 0) {
++    DCHECK_EQ(0, offset);
++    int ashmem_bytes = ashmem_get_size_region(shm_.GetHandle());
++    if (ashmem_bytes < 0)
++      return false;
++    bytes = ashmem_bytes;
++  }
++
++  // Sanity check. This shall catch invalid uses of the SharedMemory APIs
++  // but will not protect against direct mmap() attempts.
++  if (shm_.IsReadOnly()) {
++    // Use a DCHECK() to call writable mappings with read-only descriptors
++    // in debug builds immediately. Return an error for release builds
++    // or during unit-testing (assuming a ScopedLogAssertHandler was installed).
++    DCHECK(read_only_)
++        << "Trying to map a region writable with a read-only descriptor.";
++    if (!read_only_) {
++      return false;
++    }
++    if (!shm_.SetRegionReadOnly()) {  // Ensure the region is read-only.
++      return false;
++    }
++  }
++#endif
++
++  memory_ = mmap(nullptr, bytes, PROT_READ | (read_only_ ? 0 : PROT_WRITE),
++                 MAP_SHARED, shm_.GetHandle(), offset);
++
++  bool mmap_succeeded = memory_ && memory_ != reinterpret_cast<void*>(-1);
++  if (mmap_succeeded) {
++    mapped_size_ = bytes;
++    mapped_id_ = shm_.GetGUID();
++    DCHECK_EQ(0U,
++              reinterpret_cast<uintptr_t>(memory_) &
++                  (SharedMemory::MAP_MINIMUM_ALIGNMENT - 1));
++    //SharedMemoryTracker::GetInstance()->IncrementMemoryUsage(*this);
++  } else {
++    memory_ = nullptr;
++  }
++
++  return mmap_succeeded;
++}
++
++bool SharedMemory::Unmap() {
++  if (!memory_)
++    return false;
++
++  //SharedMemoryTracker::GetInstance()->DecrementMemoryUsage(*this);
++  munmap(memory_, mapped_size_);
++  memory_ = nullptr;
++  mapped_size_ = 0;
++  mapped_id_ = UnguessableToken();
++  return true;
++}
++
++SharedMemoryHandle SharedMemory::handle() const {
++  return shm_;
++}
++
++SharedMemoryHandle SharedMemory::TakeHandle() {
++  SharedMemoryHandle handle_copy = shm_;
++  handle_copy.SetOwnershipPassesToIPC(true);
++  Unmap();
++  shm_ = SharedMemoryHandle();
++  return handle_copy;
++}
++
++#if !defined(OS_ANDROID)
++void SharedMemory::Close() {
++  if (shm_.IsValid()) {
++    shm_.Close();
++    shm_ = SharedMemoryHandle();
++  }
++  if (readonly_shm_.IsValid()) {
++    readonly_shm_.Close();
++    readonly_shm_ = SharedMemoryHandle();
++  }
++}
++
++SharedMemoryHandle SharedMemory::GetReadOnlyHandle() const {
++  CHECK(readonly_shm_.IsValid());
++  return readonly_shm_.Duplicate();
++}
++#endif  // !defined(OS_ANDROID)
++
++}  // namespace base
+diff --git a/base/memory/shared_memory_tracker.cc b/base/memory/shared_memory_tracker.cc
+index d1f6f05d0b60..6c3b1e8140f7 100644
+--- a/base/memory/shared_memory_tracker.cc
++++ b/base/memory/shared_memory_tracker.cc
+@@ -5,6 +5,7 @@
+ #include "base/memory/shared_memory_tracker.h"
+ 
+ #include "base/logging.h"
++#include "base/memory/shared_memory.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/trace_event/base_tracing.h"
+ #include "base/tracing_buildflags.h"
+@@ -38,6 +39,16 @@ SharedMemoryTracker::GetGlobalDumpIdForTracing(const UnguessableToken& id) {
+   return trace_event::MemoryAllocatorDumpGuid(dump_name);
+ }
+ 
++// static
++const trace_event::MemoryAllocatorDump*
++SharedMemoryTracker::GetOrCreateSharedMemoryDump(
++    const SharedMemory* shared_memory,
++    trace_event::ProcessMemoryDump* pmd) {
++  return GetOrCreateSharedMemoryDumpInternal(shared_memory->memory(),
++                                             shared_memory->mapped_size(),
++                                             shared_memory->mapped_id(), pmd);
++}
++
+ const trace_event::MemoryAllocatorDump*
+ SharedMemoryTracker::GetOrCreateSharedMemoryDump(
+     const SharedMemoryMapping& shared_memory,
+@@ -47,6 +58,14 @@ SharedMemoryTracker::GetOrCreateSharedMemoryDump(
+                                              shared_memory.guid(), pmd);
+ }
+ 
++void SharedMemoryTracker::IncrementMemoryUsage(
++    const SharedMemory& shared_memory) {
++  AutoLock hold(usages_lock_);
++  DCHECK(usages_.find(shared_memory.memory()) == usages_.end());
++  usages_.emplace(shared_memory.memory(), UsageInfo(shared_memory.mapped_size(),
++                                                    shared_memory.mapped_id()));
++}
++
+ void SharedMemoryTracker::IncrementMemoryUsage(
+     const SharedMemoryMapping& mapping) {
+   AutoLock hold(usages_lock_);
+@@ -55,6 +74,13 @@ void SharedMemoryTracker::IncrementMemoryUsage(
+                   UsageInfo(mapping.mapped_size(), mapping.guid()));
+ }
+ 
++void SharedMemoryTracker::DecrementMemoryUsage(
++    const SharedMemory& shared_memory) {
++  AutoLock hold(usages_lock_);
++  DCHECK(usages_.find(shared_memory.memory()) != usages_.end());
++  usages_.erase(shared_memory.memory());
++}
++
+ void SharedMemoryTracker::DecrementMemoryUsage(
+     const SharedMemoryMapping& mapping) {
+   AutoLock hold(usages_lock_);
+diff --git a/base/memory/shared_memory_tracker.h b/base/memory/shared_memory_tracker.h
+index e0ae3a9b13d3..5b910b5791c1 100644
+--- a/base/memory/shared_memory_tracker.h
++++ b/base/memory/shared_memory_tracker.h
+@@ -8,6 +8,7 @@
+ #include <map>
+ #include <string>
+ 
++#include "base/memory/shared_memory.h"
+ #include "base/memory/shared_memory_mapping.h"
+ #include "base/synchronization/lock.h"
+ #include "base/trace_event/base_tracing.h"
+@@ -34,14 +35,21 @@ class BASE_EXPORT SharedMemoryTracker : public trace_event::MemoryDumpProvider {
+   // Gets or creates if non-existant, a memory dump for the |shared_memory|
+   // inside the given |pmd|. Also adds the necessary edges for the dump when
+   // creating the dump.
++  static const trace_event::MemoryAllocatorDump* GetOrCreateSharedMemoryDump(
++      const SharedMemory* shared_memory,
++      trace_event::ProcessMemoryDump* pmd);
++  // We're in the middle of a refactor https://crbug.com/795291. Eventually, the
++  // first call will go away.
+   static const trace_event::MemoryAllocatorDump* GetOrCreateSharedMemoryDump(
+       const SharedMemoryMapping& shared_memory,
+       trace_event::ProcessMemoryDump* pmd);
+ 
+   // Records shared memory usage on valid mapping.
++  void IncrementMemoryUsage(const SharedMemory& shared_memory);
+   void IncrementMemoryUsage(const SharedMemoryMapping& mapping);
+ 
+   // Records shared memory usage on unmapping.
++  void DecrementMemoryUsage(const SharedMemory& shared_memory);
+   void DecrementMemoryUsage(const SharedMemoryMapping& mapping);
+ 
+   // Root dump name for all shared memory dumps.
+diff --git a/base/memory/shared_memory_unittest.cc b/base/memory/shared_memory_unittest.cc
+new file mode 100644
+index 000000000000..f0c03a5de5af
+--- /dev/null
++++ b/base/memory/shared_memory_unittest.cc
+@@ -0,0 +1,748 @@
++// Copyright (c) 2012 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/memory/shared_memory.h"
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <memory>
++
++#include "base/atomicops.h"
++#include "base/base_switches.h"
++#include "base/bind.h"
++#include "base/command_line.h"
++#include "base/logging.h"
++#include "base/memory/shared_memory_handle.h"
++#include "base/process/kill.h"
++#include "base/rand_util.h"
++#include "base/stl_util.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/string_piece.h"
++#include "base/strings/string_util.h"
++#include "base/system/sys_info.h"
++#include "base/test/multiprocess_test.h"
++#include "base/threading/platform_thread.h"
++#include "base/time/time.h"
++#include "base/unguessable_token.h"
++#include "build/build_config.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "testing/multiprocess_func_list.h"
++
++#if defined(OS_ANDROID)
++#include "base/callback.h"
++#endif
++
++#if defined(OS_POSIX)
++#include <errno.h>
++#include <fcntl.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <unistd.h>
++#endif
++
++#if defined(OS_LINUX)
++#include <sys/syscall.h>
++#endif
++
++#if defined(OS_WIN)
++#include "base/win/scoped_handle.h"
++#endif
++
++#if defined(OS_FUCHSIA)
++#include <lib/zx/vmar.h>
++#include <lib/zx/vmo.h>
++#endif
++
++namespace base {
++
++namespace {
++
++// Each thread will open the shared memory.  Each thread will take a different 4
++// byte int pointer, and keep changing it, with some small pauses in between.
++// Verify that each thread's value in the shared memory is always correct.
++class MultipleThreadMain : public PlatformThread::Delegate {
++ public:
++  static const uint32_t kDataSize = 1024;
++
++  MultipleThreadMain(int16_t id, SharedMemoryHandle handle)
++      : id_(id), shm_(handle, false) {}
++  ~MultipleThreadMain() override = default;
++
++  // PlatformThread::Delegate interface.
++  void ThreadMain() override {
++    EXPECT_TRUE(shm_.Map(kDataSize));
++    int* ptr = static_cast<int*>(shm_.memory()) + id_;
++    EXPECT_EQ(0, *ptr);
++
++    for (int idx = 0; idx < 100; idx++) {
++      *ptr = idx;
++      PlatformThread::Sleep(TimeDelta::FromMilliseconds(1));
++      EXPECT_EQ(*ptr, idx);
++    }
++    // Reset back to 0 for the next test that uses the same name.
++    *ptr = 0;
++
++    shm_.Unmap();
++  }
++
++ private:
++  int16_t id_;
++  SharedMemory shm_;
++
++  DISALLOW_COPY_AND_ASSIGN(MultipleThreadMain);
++};
++
++enum class Mode {
++  Default,
++#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
++  DisableDevShm = 1,
++#endif
++};
++
++class SharedMemoryTest : public ::testing::TestWithParam<Mode> {
++ public:
++  void SetUp() override {
++    switch (GetParam()) {
++      case Mode::Default:
++        break;
++#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
++      case Mode::DisableDevShm:
++        CommandLine* cmdline = CommandLine::ForCurrentProcess();
++        cmdline->AppendSwitch(switches::kDisableDevShmUsage);
++        break;
++#endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
++    }
++  }
++};
++
++}  // namespace
++
++// Check that memory is still mapped after its closed.
++TEST_P(SharedMemoryTest, CloseNoUnmap) {
++  const size_t kDataSize = 4096;
++
++  SharedMemory memory;
++  ASSERT_TRUE(memory.CreateAndMapAnonymous(kDataSize));
++  char* ptr = static_cast<char*>(memory.memory());
++  ASSERT_NE(ptr, static_cast<void*>(nullptr));
++  memset(ptr, 'G', kDataSize);
++
++  memory.Close();
++
++  EXPECT_EQ(ptr, memory.memory());
++  EXPECT_TRUE(!memory.handle().IsValid());
++
++  for (size_t i = 0; i < kDataSize; i++) {
++    EXPECT_EQ('G', ptr[i]);
++  }
++
++  memory.Unmap();
++  EXPECT_EQ(nullptr, memory.memory());
++}
++
++// Create a set of N threads to each open a shared memory segment and write to
++// it. Verify that they are always reading/writing consistent data.
++TEST_P(SharedMemoryTest, MultipleThreads) {
++  const int kNumThreads = 5;
++
++  // On POSIX we have a problem when 2 threads try to create the shmem
++  // (a file) at exactly the same time, since create both creates the
++  // file and zerofills it.  We solve the problem for this unit test
++  // (make it not flaky) by starting with 1 thread, then
++  // intentionally don't clean up its shmem before running with
++  // kNumThreads.
++
++  SharedMemoryCreateOptions options;
++  options.size = MultipleThreadMain::kDataSize;
++  SharedMemory shm;
++  EXPECT_TRUE(shm.Create(options));
++
++  int threadcounts[] = { 1, kNumThreads };
++  for (auto numthreads : threadcounts) {
++    std::unique_ptr<PlatformThreadHandle[]> thread_handles;
++    std::unique_ptr<MultipleThreadMain* []> thread_delegates;
++
++    thread_handles.reset(new PlatformThreadHandle[numthreads]);
++    thread_delegates.reset(new MultipleThreadMain*[numthreads]);
++
++    // Spawn the threads.
++    for (int16_t index = 0; index < numthreads; index++) {
++      PlatformThreadHandle pth;
++      thread_delegates[index] =
++          new MultipleThreadMain(index, shm.handle().Duplicate());
++      EXPECT_TRUE(PlatformThread::Create(0, thread_delegates[index], &pth));
++      thread_handles[index] = pth;
++    }
++
++    // Wait for the threads to finish.
++    for (int index = 0; index < numthreads; index++) {
++      PlatformThread::Join(thread_handles[index]);
++      delete thread_delegates[index];
++    }
++  }
++}
++
++// Allocate private (unique) shared memory with an empty string for a
++// name.  Make sure several of them don't point to the same thing as
++// we might expect if the names are equal.
++TEST_P(SharedMemoryTest, AnonymousPrivate) {
++  int i, j;
++  int count = 4;
++  bool rv;
++  const uint32_t kDataSize = 8192;
++
++  std::unique_ptr<SharedMemory[]> memories(new SharedMemory[count]);
++  std::unique_ptr<int* []> pointers(new int*[count]);
++  ASSERT_TRUE(memories.get());
++  ASSERT_TRUE(pointers.get());
++
++  for (i = 0; i < count; i++) {
++    rv = memories[i].CreateAndMapAnonymous(kDataSize);
++    EXPECT_TRUE(rv);
++    int* ptr = static_cast<int*>(memories[i].memory());
++    EXPECT_TRUE(ptr);
++    pointers[i] = ptr;
++  }
++
++  for (i = 0; i < count; i++) {
++    // zero out the first int in each except for i; for that one, make it 100.
++    for (j = 0; j < count; j++) {
++      if (i == j)
++        pointers[j][0] = 100;
++      else
++        pointers[j][0] = 0;
++    }
++    // make sure there is no bleeding of the 100 into the other pointers
++    for (j = 0; j < count; j++) {
++      if (i == j)
++        EXPECT_EQ(100, pointers[j][0]);
++      else
++        EXPECT_EQ(0, pointers[j][0]);
++    }
++  }
++
++  for (i = 0; i < count; i++) {
++    memories[i].Close();
++  }
++}
++
++#if !(defined(OS_MACOSX) && !defined(OS_IOS))
++// The Mach functionality is tested in shared_memory_mac_unittest.cc.
++TEST_P(SharedMemoryTest, GetReadOnlyHandle) {
++  StringPiece contents = "Hello World";
++
++  SharedMemory writable_shmem;
++  SharedMemoryCreateOptions options;
++  options.size = contents.size();
++  options.share_read_only = true;
++  ASSERT_TRUE(writable_shmem.Create(options));
++  ASSERT_TRUE(writable_shmem.Map(options.size));
++  memcpy(writable_shmem.memory(), contents.data(), contents.size());
++  EXPECT_TRUE(writable_shmem.Unmap());
++
++  SharedMemoryHandle readonly_handle = writable_shmem.GetReadOnlyHandle();
++  EXPECT_EQ(writable_shmem.handle().GetGUID(), readonly_handle.GetGUID());
++  EXPECT_EQ(writable_shmem.handle().GetSize(), readonly_handle.GetSize());
++  ASSERT_TRUE(readonly_handle.IsValid());
++  SharedMemory readonly_shmem(readonly_handle, /*readonly=*/true);
++
++  ASSERT_TRUE(readonly_shmem.Map(contents.size()));
++  EXPECT_EQ(contents,
++            StringPiece(static_cast<const char*>(readonly_shmem.memory()),
++                        contents.size()));
++  EXPECT_TRUE(readonly_shmem.Unmap());
++
++#if defined(OS_ANDROID)
++  // On Android, mapping a region through a read-only descriptor makes the
++  // region read-only. Any writable mapping attempt should fail.
++  ASSERT_FALSE(writable_shmem.Map(contents.size()));
++#else
++  // Make sure the writable instance is still writable.
++  ASSERT_TRUE(writable_shmem.Map(contents.size()));
++  StringPiece new_contents = "Goodbye";
++  memcpy(writable_shmem.memory(), new_contents.data(), new_contents.size());
++  EXPECT_EQ(new_contents,
++            StringPiece(static_cast<const char*>(writable_shmem.memory()),
++                        new_contents.size()));
++#endif
++
++  // We'd like to check that if we send the read-only segment to another
++  // process, then that other process can't reopen it read/write.  (Since that
++  // would be a security hole.)  Setting up multiple processes is hard in a
++  // unittest, so this test checks that the *current* process can't reopen the
++  // segment read/write.  I think the test here is stronger than we actually
++  // care about, but there's a remote possibility that sending a file over a
++  // pipe would transform it into read/write.
++  SharedMemoryHandle handle = readonly_shmem.handle();
++
++#if defined(OS_ANDROID)
++  // The "read-only" handle is still writable on Android:
++  // http://crbug.com/320865
++  (void)handle;
++#elif defined(OS_FUCHSIA)
++  uintptr_t addr;
++  EXPECT_NE(ZX_OK, zx::vmar::root_self()->map(
++                       0, *zx::unowned_vmo(handle.GetHandle()), 0,
++                       contents.size(), ZX_VM_PERM_WRITE, &addr))
++      << "Shouldn't be able to map as writable.";
++
++  zx::vmo duped_handle;
++  EXPECT_NE(ZX_OK, zx::unowned_vmo(handle.GetHandle())
++                       ->duplicate(ZX_RIGHT_WRITE, &duped_handle))
++      << "Shouldn't be able to duplicate the handle into a writable one.";
++
++  EXPECT_EQ(ZX_OK, zx::unowned_vmo(handle.GetHandle())
++                       ->duplicate(ZX_RIGHT_READ, &duped_handle))
++      << "Should be able to duplicate the handle into a readable one.";
++#elif defined(OS_POSIX)
++  int handle_fd = SharedMemory::GetFdFromSharedMemoryHandle(handle);
++  EXPECT_EQ(O_RDONLY, fcntl(handle_fd, F_GETFL) & O_ACCMODE)
++      << "The descriptor itself should be read-only.";
++
++  errno = 0;
++  void* writable = mmap(nullptr, contents.size(), PROT_READ | PROT_WRITE,
++                        MAP_SHARED, handle_fd, 0);
++  int mmap_errno = errno;
++  EXPECT_EQ(MAP_FAILED, writable)
++      << "It shouldn't be possible to re-mmap the descriptor writable.";
++  EXPECT_EQ(EACCES, mmap_errno) << strerror(mmap_errno);
++  if (writable != MAP_FAILED)
++    EXPECT_EQ(0, munmap(writable, readonly_shmem.mapped_size()));
++
++#elif defined(OS_WIN)
++  EXPECT_EQ(NULL, MapViewOfFile(handle.GetHandle(), FILE_MAP_WRITE, 0, 0, 0))
++      << "Shouldn't be able to map memory writable.";
++
++  HANDLE temp_handle;
++  BOOL rv = ::DuplicateHandle(GetCurrentProcess(), handle.GetHandle(),
++                              GetCurrentProcess(), &temp_handle,
++                              FILE_MAP_ALL_ACCESS, false, 0);
++  EXPECT_EQ(FALSE, rv)
++      << "Shouldn't be able to duplicate the handle into a writable one.";
++  if (rv)
++    win::ScopedHandle writable_handle(temp_handle);
++  rv = ::DuplicateHandle(GetCurrentProcess(), handle.GetHandle(),
++                         GetCurrentProcess(), &temp_handle, FILE_MAP_READ,
++                         false, 0);
++  EXPECT_EQ(TRUE, rv)
++      << "Should be able to duplicate the handle into a readable one.";
++  if (rv)
++    win::ScopedHandle writable_handle(temp_handle);
++#else
++#error Unexpected platform; write a test that tries to make 'handle' writable.
++#endif  // defined(OS_POSIX) || defined(OS_WIN)
++}
++#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
++
++TEST_P(SharedMemoryTest, ShareToSelf) {
++  StringPiece contents = "Hello World";
++
++  SharedMemory shmem;
++  ASSERT_TRUE(shmem.CreateAndMapAnonymous(contents.size()));
++  memcpy(shmem.memory(), contents.data(), contents.size());
++  EXPECT_TRUE(shmem.Unmap());
++
++  SharedMemoryHandle shared_handle = shmem.handle().Duplicate();
++  ASSERT_TRUE(shared_handle.IsValid());
++  EXPECT_TRUE(shared_handle.OwnershipPassesToIPC());
++  EXPECT_EQ(shared_handle.GetGUID(), shmem.handle().GetGUID());
++  EXPECT_EQ(shared_handle.GetSize(), shmem.handle().GetSize());
++  SharedMemory shared(shared_handle, /*readonly=*/false);
++
++  ASSERT_TRUE(shared.Map(contents.size()));
++  EXPECT_EQ(
++      contents,
++      StringPiece(static_cast<const char*>(shared.memory()), contents.size()));
++
++  shared_handle = shmem.handle().Duplicate();
++  ASSERT_TRUE(shared_handle.IsValid());
++  ASSERT_TRUE(shared_handle.OwnershipPassesToIPC());
++  SharedMemory readonly(shared_handle, /*readonly=*/true);
++
++  ASSERT_TRUE(readonly.Map(contents.size()));
++  EXPECT_EQ(contents,
++            StringPiece(static_cast<const char*>(readonly.memory()),
++                        contents.size()));
++}
++
++TEST_P(SharedMemoryTest, ShareWithMultipleInstances) {
++  static const StringPiece kContents = "Hello World";
++
++  SharedMemory shmem;
++  ASSERT_TRUE(shmem.CreateAndMapAnonymous(kContents.size()));
++  // We do not need to unmap |shmem| to let |shared| map.
++  const StringPiece shmem_contents(static_cast<const char*>(shmem.memory()),
++                                   shmem.requested_size());
++
++  SharedMemoryHandle shared_handle = shmem.handle().Duplicate();
++  ASSERT_TRUE(shared_handle.IsValid());
++  SharedMemory shared(shared_handle, /*readonly=*/false);
++  ASSERT_TRUE(shared.Map(kContents.size()));
++  // The underlying shared memory is created by |shmem|, so both
++  // |shared|.requested_size() and |readonly|.requested_size() are zero.
++  ASSERT_EQ(0U, shared.requested_size());
++  const StringPiece shared_contents(static_cast<const char*>(shared.memory()),
++                                    shmem.requested_size());
++
++  shared_handle = shmem.handle().Duplicate();
++  ASSERT_TRUE(shared_handle.IsValid());
++  ASSERT_TRUE(shared_handle.OwnershipPassesToIPC());
++  SharedMemory readonly(shared_handle, /*readonly=*/true);
++  ASSERT_TRUE(readonly.Map(kContents.size()));
++  ASSERT_EQ(0U, readonly.requested_size());
++  const StringPiece readonly_contents(
++      static_cast<const char*>(readonly.memory()),
++      shmem.requested_size());
++
++  // |shmem| should be able to update the content.
++  memcpy(shmem.memory(), kContents.data(), kContents.size());
++
++  ASSERT_EQ(kContents, shmem_contents);
++  ASSERT_EQ(kContents, shared_contents);
++  ASSERT_EQ(kContents, readonly_contents);
++
++  // |shared| should also be able to update the content.
++  memcpy(shared.memory(), ToLowerASCII(kContents).c_str(), kContents.size());
++
++  ASSERT_EQ(StringPiece(ToLowerASCII(kContents)), shmem_contents);
++  ASSERT_EQ(StringPiece(ToLowerASCII(kContents)), shared_contents);
++  ASSERT_EQ(StringPiece(ToLowerASCII(kContents)), readonly_contents);
++}
++
++TEST_P(SharedMemoryTest, MapAt) {
++  ASSERT_TRUE(SysInfo::VMAllocationGranularity() >= sizeof(uint32_t));
++  const size_t kCount = SysInfo::VMAllocationGranularity();
++  const size_t kDataSize = kCount * sizeof(uint32_t);
++
++  SharedMemory memory;
++  ASSERT_TRUE(memory.CreateAndMapAnonymous(kDataSize));
++  uint32_t* ptr = static_cast<uint32_t*>(memory.memory());
++  ASSERT_NE(ptr, static_cast<void*>(nullptr));
++
++  for (size_t i = 0; i < kCount; ++i) {
++    ptr[i] = i;
++  }
++
++  memory.Unmap();
++
++  size_t offset = SysInfo::VMAllocationGranularity();
++  ASSERT_TRUE(memory.MapAt(static_cast<off_t>(offset), kDataSize - offset));
++  offset /= sizeof(uint32_t);
++  ptr = static_cast<uint32_t*>(memory.memory());
++  ASSERT_NE(ptr, static_cast<void*>(nullptr));
++  for (size_t i = offset; i < kCount; ++i) {
++    EXPECT_EQ(ptr[i - offset], i);
++  }
++}
++
++TEST_P(SharedMemoryTest, MapTwice) {
++  const uint32_t kDataSize = 1024;
++  SharedMemory memory;
++  bool rv = memory.CreateAndMapAnonymous(kDataSize);
++  EXPECT_TRUE(rv);
++
++  void* old_address = memory.memory();
++
++  rv = memory.Map(kDataSize);
++  EXPECT_FALSE(rv);
++  EXPECT_EQ(old_address, memory.memory());
++}
++
++#if defined(OS_POSIX)
++// This test is not applicable for iOS (crbug.com/399384).
++// The Mach functionality is tested in shared_memory_mac_unittest.cc.
++#if !defined(OS_MACOSX) && !defined(OS_IOS)
++// Create a shared memory object, mmap it, and mprotect it to PROT_EXEC.
++TEST_P(SharedMemoryTest, AnonymousExecutable) {
++#if defined(OS_LINUX)
++  // On Chromecast both /dev/shm and /tmp are mounted with 'noexec' option,
++  // which makes this test fail. But Chromecast doesn't use NaCL so we don't
++  // need this.
++  if (!IsPathExecutable(FilePath("/dev/shm")) &&
++      !IsPathExecutable(FilePath("/tmp"))) {
++    return;
++  }
++#endif  // OS_LINUX
++  const uint32_t kTestSize = 1 << 16;
++
++  SharedMemory shared_memory;
++  SharedMemoryCreateOptions options;
++  options.size = kTestSize;
++  options.executable = true;
++
++  EXPECT_TRUE(shared_memory.Create(options));
++  EXPECT_TRUE(shared_memory.Map(shared_memory.requested_size()));
++
++  EXPECT_EQ(0, mprotect(shared_memory.memory(), shared_memory.requested_size(),
++                        PROT_READ | PROT_EXEC));
++}
++#endif  // !defined(OS_MACOSX) && !defined(OS_IOS)
++
++#if defined(OS_ANDROID)
++// This test is restricted to Android since there is no way on other platforms
++// to guarantee that a region can never be mapped with PROT_EXEC. E.g. on
++// Linux, anonymous shared regions come from /dev/shm which can be mounted
++// without 'noexec'. In this case, anything can perform an mprotect() to
++// change the protection mask of a given page.
++TEST(SharedMemoryTest, AnonymousIsNotExecutableByDefault) {
++  const uint32_t kTestSize = 1 << 16;
++
++  SharedMemory shared_memory;
++  SharedMemoryCreateOptions options;
++  options.size = kTestSize;
++
++  EXPECT_TRUE(shared_memory.Create(options));
++  EXPECT_TRUE(shared_memory.Map(shared_memory.requested_size()));
++
++  errno = 0;
++  EXPECT_EQ(-1, mprotect(shared_memory.memory(), shared_memory.requested_size(),
++                         PROT_READ | PROT_EXEC));
++  EXPECT_EQ(EACCES, errno);
++}
++#endif  // OS_ANDROID
++
++// Android supports a different permission model than POSIX for its "ashmem"
++// shared memory implementation. So the tests about file permissions are not
++// included on Android. Fuchsia does not use a file-backed shared memory
++// implementation.
++
++#if !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
++
++// Set a umask and restore the old mask on destruction.
++class ScopedUmaskSetter {
++ public:
++  explicit ScopedUmaskSetter(mode_t target_mask) {
++    old_umask_ = umask(target_mask);
++  }
++  ~ScopedUmaskSetter() { umask(old_umask_); }
++ private:
++  mode_t old_umask_;
++  DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedUmaskSetter);
++};
++
++// Create a shared memory object, check its permissions.
++#if !(defined(OS_MACOSX) && !defined(OS_IOS))
++// The Mach functionality is tested in shared_memory_mac_unittest.cc.
++TEST_P(SharedMemoryTest, FilePermissionsAnonymous) {
++  const uint32_t kTestSize = 1 << 8;
++
++  SharedMemory shared_memory;
++  SharedMemoryCreateOptions options;
++  options.size = kTestSize;
++  // Set a file mode creation mask that gives all permissions.
++  ScopedUmaskSetter permissive_mask(S_IWGRP | S_IWOTH);
++
++  EXPECT_TRUE(shared_memory.Create(options));
++
++  int shm_fd =
++      SharedMemory::GetFdFromSharedMemoryHandle(shared_memory.handle());
++  struct stat shm_stat;
++  EXPECT_EQ(0, fstat(shm_fd, &shm_stat));
++  // Neither the group, nor others should be able to read the shared memory
++  // file.
++  EXPECT_FALSE(shm_stat.st_mode & S_IRWXO);
++  EXPECT_FALSE(shm_stat.st_mode & S_IRWXG);
++}
++#endif  // !(defined(OS_MACOSX) && !defined(OS_IOS)
++
++// Create a shared memory object, check its permissions.
++#if !(defined(OS_MACOSX) && !defined(OS_IOS))
++// The Mach functionality is tested in shared_memory_mac_unittest.cc.
++TEST_P(SharedMemoryTest, FilePermissionsNamed) {
++  const uint32_t kTestSize = 1 << 8;
++
++  SharedMemory shared_memory;
++  SharedMemoryCreateOptions options;
++  options.size = kTestSize;
++
++  // Set a file mode creation mask that gives all permissions.
++  ScopedUmaskSetter permissive_mask(S_IWGRP | S_IWOTH);
++
++  EXPECT_TRUE(shared_memory.Create(options));
++
++  int fd = SharedMemory::GetFdFromSharedMemoryHandle(shared_memory.handle());
++  struct stat shm_stat;
++  EXPECT_EQ(0, fstat(fd, &shm_stat));
++  // Neither the group, nor others should have been able to open the shared
++  // memory file while its name existed.
++  EXPECT_FALSE(shm_stat.st_mode & S_IRWXO);
++  EXPECT_FALSE(shm_stat.st_mode & S_IRWXG);
++}
++#endif  // !(defined(OS_MACOSX) && !defined(OS_IOS)
++#endif  // !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
++
++#endif  // defined(OS_POSIX)
++
++// Map() will return addresses which are aligned to the platform page size, this
++// varies from platform to platform though.  Since we'd like to advertise a
++// minimum alignment that callers can count on, test for it here.
++TEST_P(SharedMemoryTest, MapMinimumAlignment) {
++  static const int kDataSize = 8192;
++
++  SharedMemory shared_memory;
++  ASSERT_TRUE(shared_memory.CreateAndMapAnonymous(kDataSize));
++  EXPECT_EQ(0U, reinterpret_cast<uintptr_t>(
++      shared_memory.memory()) & (SharedMemory::MAP_MINIMUM_ALIGNMENT - 1));
++  shared_memory.Close();
++}
++
++#if defined(OS_WIN)
++TEST_P(SharedMemoryTest, UnsafeImageSection) {
++  const char kTestSectionName[] = "UnsafeImageSection";
++  wchar_t path[MAX_PATH];
++  EXPECT_GT(::GetModuleFileName(nullptr, path, base::size(path)), 0U);
++
++  // Map the current executable image to save us creating a new PE file on disk.
++  base::win::ScopedHandle file_handle(::CreateFile(
++      path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr));
++  EXPECT_TRUE(file_handle.IsValid());
++  base::win::ScopedHandle section_handle(
++      ::CreateFileMappingA(file_handle.Get(), nullptr,
++                           PAGE_READONLY | SEC_IMAGE, 0, 0, kTestSectionName));
++  EXPECT_TRUE(section_handle.IsValid());
++
++  // Check opening from handle and duplicated from handle.
++  SharedMemory shared_memory_handle_local(
++      SharedMemoryHandle(section_handle.Take(), 1, UnguessableToken::Create()),
++      true);
++  EXPECT_FALSE(shared_memory_handle_local.Map(1));
++  EXPECT_EQ(nullptr, shared_memory_handle_local.memory());
++
++  // Check that a handle without SECTION_QUERY also can't be mapped as it can't
++  // be checked.
++  SharedMemory shared_memory_handle_dummy;
++  SharedMemoryCreateOptions options;
++  options.size = 0x1000;
++  EXPECT_TRUE(shared_memory_handle_dummy.Create(options));
++  HANDLE handle_no_query;
++  EXPECT_TRUE(::DuplicateHandle(
++      ::GetCurrentProcess(), shared_memory_handle_dummy.handle().GetHandle(),
++      ::GetCurrentProcess(), &handle_no_query, FILE_MAP_READ, FALSE, 0));
++  SharedMemory shared_memory_handle_no_query(
++      SharedMemoryHandle(handle_no_query, options.size,
++                         UnguessableToken::Create()),
++      true);
++  EXPECT_FALSE(shared_memory_handle_no_query.Map(1));
++  EXPECT_EQ(nullptr, shared_memory_handle_no_query.memory());
++}
++#endif  // defined(OS_WIN)
++
++#if !(defined(OS_MACOSX) && !defined(OS_IOS))
++// The Mach functionality is tested in shared_memory_mac_unittest.cc.
++TEST_P(SharedMemoryTest, MappedId) {
++  const uint32_t kDataSize = 1024;
++  SharedMemory memory;
++  SharedMemoryCreateOptions options;
++  options.size = kDataSize;
++
++  EXPECT_TRUE(memory.Create(options));
++  base::UnguessableToken id = memory.handle().GetGUID();
++  EXPECT_FALSE(id.is_empty());
++  EXPECT_TRUE(memory.mapped_id().is_empty());
++
++  EXPECT_TRUE(memory.Map(kDataSize));
++  EXPECT_EQ(id, memory.mapped_id());
++
++  memory.Close();
++  EXPECT_EQ(id, memory.mapped_id());
++
++  memory.Unmap();
++  EXPECT_TRUE(memory.mapped_id().is_empty());
++}
++#endif  // !(defined(OS_MACOSX) && !defined(OS_IOS)
++
++INSTANTIATE_TEST_SUITE_P(Default,
++                         SharedMemoryTest,
++                         ::testing::Values(Mode::Default));
++#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
++INSTANTIATE_TEST_SUITE_P(SkipDevShm,
++                         SharedMemoryTest,
++                         ::testing::Values(Mode::DisableDevShm));
++#endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
++
++#if defined(OS_ANDROID)
++TEST(SharedMemoryTest, ReadOnlyRegions) {
++  const uint32_t kDataSize = 1024;
++  SharedMemory memory;
++  SharedMemoryCreateOptions options;
++  options.size = kDataSize;
++  EXPECT_TRUE(memory.Create(options));
++
++  EXPECT_FALSE(memory.handle().IsRegionReadOnly());
++
++  // Check that it is possible to map the region directly from the fd.
++  int region_fd = memory.handle().GetHandle();
++  EXPECT_GE(region_fd, 0);
++  void* address = mmap(nullptr, kDataSize, PROT_READ | PROT_WRITE, MAP_SHARED,
++                       region_fd, 0);
++  bool success = address && address != MAP_FAILED;
++  ASSERT_TRUE(address);
++  ASSERT_NE(address, MAP_FAILED);
++  if (success) {
++    EXPECT_EQ(0, munmap(address, kDataSize));
++  }
++
++  ASSERT_TRUE(memory.handle().SetRegionReadOnly());
++  EXPECT_TRUE(memory.handle().IsRegionReadOnly());
++
++  // Check that it is no longer possible to map the region read/write.
++  errno = 0;
++  address = mmap(nullptr, kDataSize, PROT_READ | PROT_WRITE, MAP_SHARED,
++                 region_fd, 0);
++  success = address && address != MAP_FAILED;
++  ASSERT_FALSE(success);
++  ASSERT_EQ(EPERM, errno);
++  if (success) {
++    EXPECT_EQ(0, munmap(address, kDataSize));
++  }
++}
++
++TEST(SharedMemoryTest, ReadOnlyDescriptors) {
++  const uint32_t kDataSize = 1024;
++  SharedMemory memory;
++  SharedMemoryCreateOptions options;
++  options.size = kDataSize;
++  EXPECT_TRUE(memory.Create(options));
++
++  EXPECT_FALSE(memory.handle().IsRegionReadOnly());
++
++  // Getting a read-only descriptor should not make the region read-only itself.
++  SharedMemoryHandle ro_handle = memory.GetReadOnlyHandle();
++  EXPECT_FALSE(memory.handle().IsRegionReadOnly());
++
++  // Mapping a writable region from a read-only descriptor should not
++  // be possible, it will DCHECK() in debug builds (see test below),
++  // while returning false on release ones.
++  {
++    bool dcheck_fired = false;
++    logging::ScopedLogAssertHandler log_assert(
++        base::BindRepeating([](bool* flag, const char*, int, base::StringPiece,
++                               base::StringPiece) { *flag = true; },
++                            base::Unretained(&dcheck_fired)));
++
++    SharedMemory rw_region(ro_handle.Duplicate(), /* read_only */ false);
++    EXPECT_FALSE(rw_region.Map(kDataSize));
++    EXPECT_EQ(DCHECK_IS_ON() ? true : false, dcheck_fired);
++  }
++
++  // Nor shall it turn the region read-only itself.
++  EXPECT_FALSE(ro_handle.IsRegionReadOnly());
++
++  // Mapping a read-only region from a read-only descriptor should work.
++  SharedMemory ro_region(ro_handle.Duplicate(), /* read_only */ true);
++  EXPECT_TRUE(ro_region.Map(kDataSize));
++
++  // And it should turn the region read-only too.
++  EXPECT_TRUE(ro_handle.IsRegionReadOnly());
++  EXPECT_TRUE(memory.handle().IsRegionReadOnly());
++  EXPECT_FALSE(memory.Map(kDataSize));
++
++  ro_handle.Close();
++}
++
++#endif  // OS_ANDROID
++
++}  // namespace base
+diff --git a/base/metrics/persistent_memory_allocator.cc b/base/metrics/persistent_memory_allocator.cc
+index 5a7459ed2d1a..122f6c6e9275 100644
+--- a/base/metrics/persistent_memory_allocator.cc
++++ b/base/metrics/persistent_memory_allocator.cc
+@@ -17,6 +17,7 @@
+ #include "base/debug/alias.h"
+ #include "base/files/memory_mapped_file.h"
+ #include "base/logging.h"
++#include "base/memory/shared_memory.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/metrics/sparse_histogram.h"
+ #include "base/numerics/safe_conversions.h"
+diff --git a/base/test/test_shared_memory_util.cc b/base/test/test_shared_memory_util.cc
+index 43bbb7dbc2ef..82b695a48f38 100644
+--- a/base/test/test_shared_memory_util.cc
++++ b/base/test/test_shared_memory_util.cc
+@@ -116,6 +116,19 @@ bool CheckReadOnlySharedMemoryWindowsHandle(HANDLE handle) {
+ }
+ #endif
+ 
++bool CheckReadOnlySharedMemoryHandleForTesting(SharedMemoryHandle handle) {
++#if defined(OS_MACOSX) && !defined(OS_IOS)
++  return CheckReadOnlySharedMemoryMachPort(handle.memory_object_);
++#elif defined(OS_FUCHSIA)
++  return CheckReadOnlySharedMemoryFuchsiaHandle(
++      zx::unowned_vmo(handle.GetHandle()));
++#elif defined(OS_WIN)
++  return CheckReadOnlySharedMemoryWindowsHandle(handle.GetHandle());
++#else
++  return CheckReadOnlySharedMemoryFdPosix(handle.GetHandle());
++#endif
++}
++
+ bool CheckReadOnlyPlatformSharedMemoryRegionForTesting(
+     subtle::PlatformSharedMemoryRegion region) {
+   if (region.GetMode() != subtle::PlatformSharedMemoryRegion::Mode::kReadOnly) {
+diff --git a/base/test/test_shared_memory_util.h b/base/test/test_shared_memory_util.h
+index e23d83e1fee0..d89f11d72a18 100644
+--- a/base/test/test_shared_memory_util.h
++++ b/base/test/test_shared_memory_util.h
+@@ -7,14 +7,18 @@
+ 
+ #include "base/memory/platform_shared_memory_region.h"
+ #include "base/memory/read_only_shared_memory_region.h"
++#include "base/memory/shared_memory_handle.h"
+ #include "base/memory/shared_memory_mapping.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ 
+ namespace base {
+ 
+-// Check that the shared memory |region| cannot be used to perform a writable
+-// mapping with low-level system APIs like mmap(). Return true in case of
+-// success (i.e. writable mappings are _not_ allowed), or false otherwise.
++// Check that the shared memory |handle| cannot be used to perform
++// a writable mapping with low-level system APIs like mmap(). Return true
++// in case of success (i.e. writable mappings are _not_ allowed), or false
++// otherwise.
++bool CheckReadOnlySharedMemoryHandleForTesting(SharedMemoryHandle handle);
++
+ bool CheckReadOnlyPlatformSharedMemoryRegionForTesting(
+     subtle::PlatformSharedMemoryRegion region);
+ 
+-- 
+2.28.0.1011.ga647a8990f-goog
+

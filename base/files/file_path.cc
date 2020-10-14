@@ -7,9 +7,10 @@
 #include <string.h>
 #include <algorithm>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/macros.h"
 #include "base/pickle.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -35,7 +36,8 @@ using StringPieceType = FilePath::StringPieceType;
 
 namespace {
 
-const char* const kCommonDoubleExtensionSuffixes[] = { "gz", "z", "bz2", "bz" };
+const char* const kCommonDoubleExtensionSuffixes[] = {"gz", "xz", "bz2", "z",
+                                                      "bz"};
 const char* const kCommonDoubleExtensions[] = { "user.js" };
 
 const FilePath::CharType kStringTerminator = FILE_PATH_LITERAL('\0');
@@ -174,8 +176,7 @@ FilePath::FilePath() = default;
 FilePath::FilePath(const FilePath& that) = default;
 FilePath::FilePath(FilePath&& that) noexcept = default;
 
-FilePath::FilePath(StringPieceType path) {
-  path.CopyToString(&path_);
+FilePath::FilePath(StringPieceType path) : path_(path) {
   StringType::size_type nul_pos = path_.find(kStringTerminator);
   if (nul_pos != StringType::npos)
     path_.erase(nul_pos, StringType::npos);
@@ -185,7 +186,7 @@ FilePath::~FilePath() = default;
 
 FilePath& FilePath::operator=(const FilePath& that) = default;
 
-FilePath& FilePath::operator=(FilePath&& that) = default;
+FilePath& FilePath::operator=(FilePath&& that) noexcept = default;
 
 bool FilePath::operator==(const FilePath& that) const {
 #if defined(FILE_PATH_USES_DRIVE_LETTERS)
@@ -411,18 +412,15 @@ FilePath FilePath::InsertBeforeExtension(StringPieceType suffix) const {
   if (IsEmptyOrSpecialCase(BaseName().value()))
     return FilePath();
 
-  StringType ext = Extension();
-  StringType ret = RemoveExtension().value();
-  suffix.AppendToString(&ret);
-  ret.append(ext);
-  return FilePath(ret);
+  return FilePath(
+      base::StrCat({RemoveExtension().value(), suffix, Extension()}));
 }
 
 FilePath FilePath::InsertBeforeExtensionASCII(StringPiece suffix)
     const {
   DCHECK(IsStringASCII(suffix));
 #if defined(OS_WIN)
-  return InsertBeforeExtension(ASCIIToUTF16(suffix));
+  return InsertBeforeExtension(UTF8ToWide(suffix));
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   return InsertBeforeExtension(suffix);
 #endif
@@ -442,14 +440,14 @@ FilePath FilePath::AddExtension(StringPieceType extension) const {
       *(str.end() - 1) != kExtensionSeparator) {
     str.append(1, kExtensionSeparator);
   }
-  extension.AppendToString(&str);
+  str.append(extension.data(), extension.size());
   return FilePath(str);
 }
 
 FilePath FilePath::AddExtensionASCII(StringPiece extension) const {
   DCHECK(IsStringASCII(extension));
 #if defined(OS_WIN)
-  return AddExtension(ASCIIToUTF16(extension));
+  return AddExtension(UTF8ToWide(extension));
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   return AddExtension(extension);
 #endif
@@ -468,7 +466,7 @@ FilePath FilePath::ReplaceExtension(StringPieceType extension) const {
   StringType str = no_ext.value();
   if (extension[0] != kExtensionSeparator)
     str.append(1, kExtensionSeparator);
-  extension.AppendToString(&str);
+  str.append(extension.data(), extension.size());
   return FilePath(str);
 }
 
@@ -489,7 +487,7 @@ FilePath FilePath::Append(StringPieceType component) const {
 
   StringType::size_type nul_pos = component.find(kStringTerminator);
   if (nul_pos != StringPieceType::npos) {
-    component.substr(0, nul_pos).CopyToString(&without_nuls);
+    without_nuls = StringType(component.substr(0, nul_pos));
     appended = StringPieceType(without_nuls);
   }
 
@@ -523,7 +521,7 @@ FilePath FilePath::Append(StringPieceType component) const {
     }
   }
 
-  appended.AppendToString(&new_path.path_);
+  new_path.path_.append(appended.data(), appended.size());
   return new_path;
 }
 
@@ -534,7 +532,7 @@ FilePath FilePath::Append(const FilePath& component) const {
 FilePath FilePath::AppendASCII(StringPiece component) const {
   DCHECK(base::IsStringASCII(component));
 #if defined(OS_WIN)
-  return Append(ASCIIToUTF16(component));
+  return Append(UTF8ToWide(component));
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   return Append(component);
 #endif
@@ -598,31 +596,29 @@ bool FilePath::ReferencesParent() const {
 #if defined(OS_WIN)
 
 string16 FilePath::LossyDisplayName() const {
-  return path_;
+  return AsString16(path_);
 }
 
 std::string FilePath::MaybeAsASCII() const {
-  if (base::IsStringASCII(path_))
-    return UTF16ToASCII(path_);
-  return std::string();
+  return base::IsStringASCII(path_) ? WideToASCII(path_) : std::string();
 }
 
 std::string FilePath::AsUTF8Unsafe() const {
-  return UTF16ToUTF8(value());
+  return WideToUTF8(value());
 }
 
 string16 FilePath::AsUTF16Unsafe() const {
-  return value();
+  return WideToUTF16(value());
 }
 
 // static
 FilePath FilePath::FromUTF8Unsafe(StringPiece utf8) {
-  return FilePath(UTF8ToUTF16(utf8));
+  return FilePath(UTF8ToWide(utf8));
 }
 
 // static
 FilePath FilePath::FromUTF16Unsafe(StringPiece16 utf16) {
-  return FilePath(utf16);
+  return FilePath(AsWStringPiece(utf16));
 }
 
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
@@ -678,7 +674,7 @@ FilePath FilePath::FromUTF16Unsafe(StringPiece16 utf16) {
 
 void FilePath::WriteToPickle(Pickle* pickle) const {
 #if defined(OS_WIN)
-  pickle->WriteString16(path_);
+  pickle->WriteString16(AsStringPiece16(path_));
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   pickle->WriteString(path_);
 #else
@@ -688,8 +684,10 @@ void FilePath::WriteToPickle(Pickle* pickle) const {
 
 bool FilePath::ReadFromPickle(PickleIterator* iter) {
 #if defined(OS_WIN)
-  if (!iter->ReadString16(&path_))
+  base::string16 path;
+  if (!iter->ReadString16(&path))
     return false;
+  path_ = UTF16ToWide(path);
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   if (!iter->ReadString(&path_))
     return false;

@@ -1,27 +1,21 @@
-From f7ef75a1ddea9d18e1f166b76e90f948cbfd1f77 Mon Sep 17 00:00:00 2001
-From: Qijiang Fan <fqj@chromium.org>
-Date: Tue, 31 Mar 2020 17:43:16 +0900
-Subject: [PATCH] libchrome: fix integer overflow if microseconds is INT64_MIN
+diff --git a/base/time/time.cc b/base/time/time.cc
+index 54e2035f5ff6..72a5427e423a 100644
+--- a/base/time/time.cc
++++ b/base/time/time.cc
+@@ -395,12 +395,12 @@ bool Time::FromMillisecondsSinceUnixEpoch(int64_t unix_milliseconds,
+ }
+ 
+ int64_t Time::ToRoundedDownMillisecondsSinceUnixEpoch() const {
+   // Adjust from Windows epoch (1601) to Unix epoch (1970).
+-  int64_t microseconds = us_ - kTimeTToMicrosecondsOffset;
++  int64_t microseconds = base::ClampSub(us_, kTimeTToMicrosecondsOffset);
 
-Change-Id: Id3641f6b625f716ae6d134002c0224ed32284939
----
- base/time/time_exploded_posix.cc | 3 +--
- 1 file changed, 1 insertion(+), 2 deletions(-)
-
-diff --git a/base/time/time_exploded_posix.cc b/base/time/time_exploded_posix.cc
-index 627c6b4f8735..2aef3864554e 100644
---- a/base/time/time_exploded_posix.cc
-+++ b/base/time/time_exploded_posix.cc
-@@ -141,8 +141,7 @@ void Time::Explode(bool is_local, Exploded* exploded) const {
-     millisecond = milliseconds % kMillisecondsPerSecond;
+   // Round the microseconds towards -infinity.
+   if (microseconds >= 0) {
+     // In this case, rounding towards -infinity means rounding towards 0.
+     return microseconds / kMicrosecondsPerMillisecond;
    } else {
-     // Round these *down* (towards -infinity).
--    milliseconds = (microseconds - kMicrosecondsPerMillisecond + 1) /
--                   kMicrosecondsPerMillisecond;
-+    milliseconds = (microseconds + 1) / kMicrosecondsPerMillisecond - 1;
-     seconds =
-         (milliseconds - kMillisecondsPerSecond + 1) / kMillisecondsPerSecond;
-     // Make this nonnegative (and between 0 and 999 inclusive).
--- 
-2.24.1
-
+     return (microseconds + 1) / kMicrosecondsPerMillisecond - 1;
+   }
+ }
+ 

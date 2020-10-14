@@ -4,7 +4,7 @@
 
 #include "base/task/thread_pool/worker_thread_stack.h"
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/memory/ref_counted.h"
 #include "base/task/thread_pool/task_source.h"
 #include "base/task/thread_pool/task_tracker.h"
@@ -25,7 +25,7 @@ class MockWorkerThreadDelegate : public WorkerThread::Delegate {
     return WorkerThread::ThreadLabel::DEDICATED;
   }
   void OnMainEntry(const WorkerThread* worker) override {}
-  RunIntentWithRegisteredTaskSource GetWork(WorkerThread* worker) override {
+  RegisteredTaskSource GetWork(WorkerThread* worker) override {
     return nullptr;
   }
   void DidProcessTask(RegisteredTaskSource task_source) override {

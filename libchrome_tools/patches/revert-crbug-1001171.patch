@@ -1,0 +1,22 @@
+diff --git a/mojo/public/tools/bindings/mojom_bindings_generator.py b/mojo/public/tools/bindings/mojom_bindings_generator.py
+index da9efc71cefd..0467500755af 100755
+--- a/mojo/public/tools/bindings/mojom_bindings_generator.py
++++ b/mojo/public/tools/bindings/mojom_bindings_generator.py
+@@ -44,10 +44,6 @@ from mojom.generate import template_expander
+ from mojom.generate import translate
+ from mojom.generate.generator import WriteFile
+ 
+-sys.path.append(
+-    os.path.join(_GetDirAbove("mojo"), "tools", "diagnosis"))
+-import crbug_1001171
+-
+ 
+ _BUILTIN_GENERATORS = {
+     "c++": "mojom_cpp_generator",
+@@ -386,5 +382,4 @@ def main():
+ 
+ 
+ if __name__ == "__main__":
+-  with crbug_1001171.DumpStateOnLookupError():
+-    sys.exit(main())
++  sys.exit(main())
