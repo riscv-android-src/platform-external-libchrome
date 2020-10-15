@@ -43,7 +43,7 @@ namespace logging {
 class VoidifyStream {
  public:
   VoidifyStream() = default;
-  explicit VoidifyStream(bool ignored) {}
+  explicit VoidifyStream(bool/* ignored  -Wunused-parameter */) {}
 
   // This operator has lower precedence than << but higher than ?:
   void operator&(std::ostream&) {}
