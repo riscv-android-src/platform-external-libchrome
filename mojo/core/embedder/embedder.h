@@ -9,10 +9,8 @@
 
 #include <string>
 
-#include "base/callback.h"
 #include "base/component_export.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/shared_memory_handle.h"
 #include "base/process/process_handle.h"
 #include "base/task_runner.h"
 #include "build/build_config.h"
@@ -20,8 +18,6 @@
 
 namespace mojo {
 namespace core {
-
-using ProcessErrorCallback = base::Callback<void(const std::string& error)>;
 
 // Basic configuration/initialization ------------------------------------------
 
@@ -34,11 +30,6 @@ void Init(const Configuration& configuration);
 
 // Like above but uses a default Configuration.
 COMPONENT_EXPORT(MOJO_CORE_EMBEDDER) void Init();
-
-// Sets a default callback to invoke when an internal error is reported but
-// cannot be associated with a specific child process. Calling this is optional.
-COMPONENT_EXPORT(MOJO_CORE_EMBEDDER)
-void SetDefaultProcessErrorCallback(const ProcessErrorCallback& callback);
 
 // Initialialization/shutdown for interprocess communication (IPC) -------------
 

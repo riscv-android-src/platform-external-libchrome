@@ -3,26 +3,30 @@
 // found in the LICENSE file.
 
 #include "base/power_monitor/power_monitor.h"
+
 #include "base/macros.h"
 #include "base/test/power_monitor_test_base.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace base {
 
 class PowerMonitorTest : public testing::Test {
  protected:
-  PowerMonitorTest() {
+  PowerMonitorTest() = default;
+
+  void TearDown() override { PowerMonitor::ShutdownForTesting(); }
+
+  void PowerMonitorInitialize() {
     power_monitor_source_ = new PowerMonitorTestSource();
     PowerMonitor::Initialize(
         std::unique_ptr<PowerMonitorSource>(power_monitor_source_));
   }
-  ~PowerMonitorTest() override { PowerMonitor::ShutdownForTesting(); }
 
   PowerMonitorTestSource* source() { return power_monitor_source_; }
 
  private:
-  test::ScopedTaskEnvironment scoped_task_environment_;
+  test::TaskEnvironment task_environment_;
   PowerMonitorTestSource* power_monitor_source_;
 
   DISALLOW_COPY_AND_ASSIGN(PowerMonitorTest);
@@ -33,9 +37,11 @@ class PowerMonitorTest : public testing::Test {
 TEST_F(PowerMonitorTest, PowerNotifications) {
   const int kObservers = 5;
 
+  PowerMonitorInitialize();
+
   PowerMonitorTestObserver observers[kObservers];
   for (auto& index : observers)
-    EXPECT_TRUE(PowerMonitor::AddObserver(&index));
+    PowerMonitor::AddObserver(&index);
 
   // Sending resume when not suspended should have no effect.
   source()->GenerateResumeEvent();
@@ -79,6 +85,54 @@ TEST_F(PowerMonitorTest, PowerNotifications) {
 
   for (auto& index : observers)
     PowerMonitor::RemoveObserver(&index);
+}
+
+TEST_F(PowerMonitorTest, ThermalThrottling) {
+  PowerMonitorTestObserver observer;
+  PowerMonitor::AddObserver(&observer);
+
+  PowerMonitorInitialize();
+
+  constexpr PowerObserver::DeviceThermalState kThermalStates[] = {
+      PowerObserver::DeviceThermalState::kUnknown,
+      PowerObserver::DeviceThermalState::kNominal,
+      PowerObserver::DeviceThermalState::kFair,
+      PowerObserver::DeviceThermalState::kSerious,
+      PowerObserver::DeviceThermalState::kCritical};
+
+  for (const auto state : kThermalStates) {
+    source()->GenerateThermalThrottlingEvent(state);
+    EXPECT_EQ(observer.last_thermal_state(), state);
+  }
+
+  PowerMonitor::RemoveObserver(&observer);
+}
+
+TEST_F(PowerMonitorTest, AddObserverBeforeAndAfterInitialization) {
+  PowerMonitorTestObserver observer1;
+  PowerMonitorTestObserver observer2;
+
+  // An observer is added before the PowerMonitor initialization.
+  PowerMonitor::AddObserver(&observer1);
+
+  PowerMonitorInitialize();
+
+  // An observer is added after the PowerMonitor initialization.
+  PowerMonitor::AddObserver(&observer2);
+
+  // Simulate suspend/resume notifications.
+  source()->GenerateSuspendEvent();
+  EXPECT_EQ(observer1.suspends(), 1);
+  EXPECT_EQ(observer2.suspends(), 1);
+  EXPECT_EQ(observer1.resumes(), 0);
+  EXPECT_EQ(observer2.resumes(), 0);
+
+  source()->GenerateResumeEvent();
+  EXPECT_EQ(observer1.resumes(), 1);
+  EXPECT_EQ(observer2.resumes(), 1);
+
+  PowerMonitor::RemoveObserver(&observer1);
+  PowerMonitor::RemoveObserver(&observer2);
 }
 
 }  // namespace base

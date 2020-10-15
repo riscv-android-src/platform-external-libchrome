@@ -10,10 +10,10 @@
 
 #include <memory>
 
+#include "base/check.h"
 #include "base/files/file_path.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/string_compare.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_util.h"
@@ -152,8 +152,8 @@ bool LocaleAwareCompareFilenames(const FilePath& a, const FilePath& b) {
   collator->setStrength(icu::Collator::TERTIARY);
 
 #if defined(OS_WIN)
-  return CompareString16WithCollator(*collator, a.value(), b.value()) ==
-         UCOL_LESS;
+  return CompareString16WithCollator(*collator, AsStringPiece16(a.value()),
+                                     AsStringPiece16(b.value())) == UCOL_LESS;
 
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   // On linux, the file system encoding is not defined. We assume

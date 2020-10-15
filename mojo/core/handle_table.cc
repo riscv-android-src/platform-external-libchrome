@@ -40,9 +40,9 @@ namespace {
 
 }  // namespace
 
-HandleTable::HandleTable() {}
+HandleTable::HandleTable() = default;
 
-HandleTable::~HandleTable() {}
+HandleTable::~HandleTable() = default;
 
 base::Lock& HandleTable::GetLock() {
   return lock_;
@@ -191,14 +191,14 @@ void HandleTable::GetActiveHandlesForTest(std::vector<MojoHandle>* handles) {
 //   return true;
 // }
 
-HandleTable::Entry::Entry() {}
+HandleTable::Entry::Entry() = default;
 
 HandleTable::Entry::Entry(scoped_refptr<Dispatcher> dispatcher)
     : dispatcher(std::move(dispatcher)) {}
 
 HandleTable::Entry::Entry(const Entry& other) = default;
 
-HandleTable::Entry::~Entry() {}
+HandleTable::Entry::~Entry() = default;
 
 }  // namespace core
 }  // namespace mojo

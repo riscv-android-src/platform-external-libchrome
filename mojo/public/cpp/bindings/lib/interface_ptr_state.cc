@@ -22,8 +22,8 @@ void InterfacePtrStateBase::QueryVersion(
   // It is safe to capture |this| because the callback won't be run after this
   // object goes away.
   endpoint_client_->QueryVersion(
-      base::BindRepeating(&InterfacePtrStateBase::OnQueryVersion,
-                          base::Unretained(this), base::Passed(&callback)));
+      base::BindOnce(&InterfacePtrStateBase::OnQueryVersion,
+                     base::Unretained(this), std::move(callback)));
 }
 
 void InterfacePtrStateBase::RequireVersion(uint32_t version) {
@@ -32,6 +32,15 @@ void InterfacePtrStateBase::RequireVersion(uint32_t version) {
 
   version_ = version;
   endpoint_client_->RequireVersion(version);
+}
+
+void InterfacePtrStateBase::PauseReceiverUntilFlushCompletes(
+    PendingFlush flush) {
+  router_->PausePeerUntilFlushCompletes(std::move(flush));
+}
+
+void InterfacePtrStateBase::FlushAsync(AsyncFlusher flusher) {
+  router_->FlushAsync(std::move(flusher));
 }
 
 void InterfacePtrStateBase::Swap(InterfacePtrStateBase* other) {
@@ -83,7 +92,7 @@ bool InterfacePtrStateBase::InitializeEndpointClient(
   DCHECK(runner_->RunsTasksInCurrentSequence());
   router_ = new MultiplexRouter(std::move(handle_), config, true, runner_);
   endpoint_client_.reset(new InterfaceEndpointClient(
-      router_->CreateLocalEndpointHandle(kMasterInterfaceId), nullptr,
+      router_->CreateLocalEndpointHandle(kPrimaryInterfaceId), nullptr,
       std::move(payload_validator), false, std::move(runner_),
       // The version is only queried from the client so the value passed here
       // will not be used.

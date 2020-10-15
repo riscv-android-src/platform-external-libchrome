@@ -16,7 +16,6 @@
 
 #include "base/allocator/buildflags.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
 #include "base/memory/free_deleter.h"
 #include "base/sanitizer_buildflags.h"
 #include "build/build_config.h"
@@ -47,9 +46,9 @@ NOINLINE Type HideValueFromCompiler(volatile Type value) {
 }
 
 // TCmalloc, currently supported only by Linux/CrOS, supports malloc limits.
-// - NO_TCMALLOC (should be defined if compiled with use_allocator!="tcmalloc")
+// - USE_TCMALLOC (should be set if compiled with use_allocator=="tcmalloc")
 // - ADDRESS_SANITIZER it has its own memory allocator
-#if defined(OS_LINUX) && !defined(NO_TCMALLOC) && !defined(ADDRESS_SANITIZER)
+#if defined(OS_LINUX) && BUILDFLAG(USE_TCMALLOC) && !defined(ADDRESS_SANITIZER)
 #define MALLOC_OVERFLOW_TEST(function) function
 #else
 #define MALLOC_OVERFLOW_TEST(function) DISABLED_##function

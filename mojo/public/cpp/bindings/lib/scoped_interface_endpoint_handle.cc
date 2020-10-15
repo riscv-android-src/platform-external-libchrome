@@ -5,7 +5,7 @@
 #include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "mojo/public/cpp/bindings/associated_group_controller.h"
@@ -372,12 +372,12 @@ void ScopedInterfaceEndpointHandle::ResetInternal(
   state_.swap(new_state);
 }
 
-base::Callback<AssociatedGroupController*()>
+base::RepeatingCallback<AssociatedGroupController*()>
 ScopedInterfaceEndpointHandle::CreateGroupControllerGetter() const {
   // We allow this callback to be run on any sequence. If this handle is created
   // in non-pending state, we don't have a lock but it should still be safe
   // because the group controller never changes.
-  return base::Bind(&State::group_controller, state_);
+  return base::BindRepeating(&State::group_controller, state_);
 }
 
 }  // namespace mojo

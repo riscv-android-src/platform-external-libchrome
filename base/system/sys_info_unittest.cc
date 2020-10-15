@@ -17,10 +17,11 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/system/sys_info.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "testing/gtest/include/gtest/gtest-death-test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -115,7 +116,8 @@ TEST_F(SysInfoTest, MAYBE_AmountOfTotalDiskSpace) {
   EXPECT_GT(SysInfo::AmountOfTotalDiskSpace(tmp_path), 0) << tmp_path.value();
 }
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
+    defined(OS_FUCHSIA)
 TEST_F(SysInfoTest, OperatingSystemVersionNumbers) {
   int32_t os_major_version = -1;
   int32_t os_minor_version = -1;
@@ -160,7 +162,7 @@ TEST_F(SysInfoTest, HardwareModelNameFormatMacAndiOS) {
 #endif
 
 TEST_F(SysInfoTest, GetHardwareInfo) {
-  test::ScopedTaskEnvironment task_environment;
+  test::TaskEnvironment task_environment;
   base::Optional<SysInfo::HardwareInfo> hardware_info;
 
   auto callback = base::BindOnce(
@@ -265,6 +267,34 @@ TEST_F(SysInfoTest, IsRunningOnChromeOS) {
   const char kLsbRelease3[] = "CHROMEOS_RELEASE_NAME=Chromium OS\n";
   SysInfo::SetChromeOSVersionInfoForTest(kLsbRelease3, Time());
   EXPECT_TRUE(SysInfo::IsRunningOnChromeOS());
+}
+
+TEST_F(SysInfoTest, CrashOnBaseImage) {
+  const char kLsbRelease2[] =
+      "CHROMEOS_RELEASE_NAME=Chrome OS\n"
+      "CHROMEOS_RELEASE_VERSION=1.2.3.4\n"
+      "CHROMEOS_RELEASE_TRACK=stable-channel\n";
+  SysInfo::SetChromeOSVersionInfoForTest(kLsbRelease2, Time());
+  EXPECT_TRUE(SysInfo::IsRunningOnChromeOS());
+  EXPECT_DEATH_IF_SUPPORTED({ SysInfo::CrashIfChromeOSNonTestImage(); }, "");
+}
+
+TEST_F(SysInfoTest, NoCrashOnTestImage) {
+  const char kLsbRelease2[] =
+      "CHROMEOS_RELEASE_NAME=Chrome OS\n"
+      "CHROMEOS_RELEASE_VERSION=1.2.3.4\n"
+      "CHROMEOS_RELEASE_TRACK=testimage-channel\n";
+  SysInfo::SetChromeOSVersionInfoForTest(kLsbRelease2, Time());
+  EXPECT_TRUE(SysInfo::IsRunningOnChromeOS());
+  // Should not crash.
+  SysInfo::CrashIfChromeOSNonTestImage();
+}
+
+TEST_F(SysInfoTest, NoCrashOnLinuxBuild) {
+  SysInfo::SetChromeOSVersionInfoForTest("", Time());
+  EXPECT_FALSE(SysInfo::IsRunningOnChromeOS());
+  // Should not crash.
+  SysInfo::CrashIfChromeOSNonTestImage();
 }
 
 #endif  // OS_CHROMEOS

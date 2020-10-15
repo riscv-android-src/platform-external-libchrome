@@ -13,12 +13,14 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/check_op.h"
 #include "base/lazy_instance.h"
-#include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_math.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/sequence_local_storage_slot.h"
-#include "base/trace_event/trace_event.h"
+// #include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_stub.h"
 #include "mojo/public/cpp/bindings/associated_group_controller.h"
 #include "mojo/public/cpp/bindings/lib/array_internal.h"
 #include "mojo/public/cpp/bindings/lib/tracing_helper.h"
@@ -101,8 +103,8 @@ void CreateSerializedMessageObject(uint32_t name,
                                    std::vector<ScopedHandle>* handles,
                                    ScopedMessageHandle* out_handle,
                                    internal::Buffer* out_buffer) {
-  TRACE_EVENT_WITH_FLOW0(TRACE_DISABLED_BY_DEFAULT("toplevel.flow"),
-                         "mojo::Message Send", MANGLE_MESSAGE_ID(trace_id),
+  TRACE_EVENT_WITH_FLOW0("toplevel.flow", "mojo::Message Send",
+                         MANGLE_MESSAGE_ID(trace_id),
                          TRACE_EVENT_FLAG_FLOW_OUT);
 
   ScopedMessageHandle handle;
@@ -147,8 +149,8 @@ void SerializeUnserializedContext(MojoMessageHandle message,
       reinterpret_cast<internal::UnserializedMessageContext*>(context_value);
   uint32_t trace_id = GetTraceId(context);
 
-  TRACE_EVENT_WITH_FLOW0(TRACE_DISABLED_BY_DEFAULT("toplevel.flow"),
-                         "mojo::Message Send", MANGLE_MESSAGE_ID(trace_id),
+  TRACE_EVENT_WITH_FLOW0("toplevel.flow", "mojo::Message Send",
+                         MANGLE_MESSAGE_ID(trace_id),
                          TRACE_EVENT_FLAG_FLOW_OUT);
 
   void* buffer;

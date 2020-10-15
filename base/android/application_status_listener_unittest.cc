@@ -8,10 +8,9 @@
 
 #include "base/bind.h"
 #include "base/callback_forward.h"
-#include "base/logging.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/test/scoped_task_environment.h"
+#include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -92,14 +91,14 @@ class MultiThreadedTest {
   ApplicationState state_;
   base::WaitableEvent event_;
   base::Thread thread_;
-  test::ScopedTaskEnvironment scoped_task_environment_;
+  test::TaskEnvironment task_environment_;
   std::unique_ptr<ApplicationStatusListener> listener_;
 };
 
 }  // namespace
 
 TEST(ApplicationStatusListenerTest, SingleThread) {
-  test::ScopedTaskEnvironment scoped_task_environment;
+  test::TaskEnvironment task_environment;
 
   ApplicationState result = kInvalidApplicationState;
 

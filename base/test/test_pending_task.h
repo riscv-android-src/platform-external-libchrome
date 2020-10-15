@@ -11,7 +11,7 @@
 #include "base/location.h"
 #include "base/time/time.h"
 // Unsupported in libchrome.
-// #include "base/trace_event/traced_value.h"
+// #include "base/trace_event/base_tracing.h"
 
 namespace base {
 

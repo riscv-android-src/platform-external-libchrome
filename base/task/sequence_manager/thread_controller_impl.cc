@@ -13,7 +13,7 @@
 #include "base/task/sequence_manager/lazy_now.h"
 #include "base/task/sequence_manager/sequence_manager_impl.h"
 #include "base/task/sequence_manager/sequenced_task_source.h"
-#include "base/trace_event/trace_event.h"
+#include "base/trace_event/base_tracing.h"
 
 namespace base {
 namespace sequence_manager {
@@ -57,14 +57,6 @@ std::unique_ptr<ThreadControllerImpl> ThreadControllerImpl::Create(
       funneled_sequence_manager ? funneled_sequence_manager->GetTaskRunner()
                                 : nullptr,
       time_source));
-}
-
-std::unique_ptr<ThreadControllerImpl>
-ThreadControllerImpl::CreateSequenceFunneled(
-    scoped_refptr<SingleThreadTaskRunner> task_runner,
-    const TickClock* time_source) {
-  return WrapUnique(
-      new ThreadControllerImpl(nullptr, std::move(task_runner), time_source));
 }
 
 void ThreadControllerImpl::SetSequencedTaskSource(
@@ -174,7 +166,7 @@ void ThreadControllerImpl::DoWork(WorkType work_type) {
   WeakPtr<ThreadControllerImpl> weak_ptr = weak_factory_.GetWeakPtr();
   // TODO(scheduler-dev): Consider moving to a time based work batch instead.
   for (int i = 0; i < main_sequence_only().work_batch_size_; i++) {
-    Optional<PendingTask> task = sequence_->TakeTask();
+    Task* task = sequence_->SelectNextTask();
     if (!task)
       break;
 
@@ -189,7 +181,7 @@ void ThreadControllerImpl::DoWork(WorkType work_type) {
       // Trace events should finish before we call DidRunTask to ensure that
       // SequenceManager trace events do not interfere with them.
       TRACE_TASK_EXECUTION("ThreadControllerImpl::RunTask", *task);
-      task_annotator_.RunTask("SequenceManager RunTask", &*task);
+      task_annotator_.RunTask("SequenceManager RunTask", task);
     }
 
     if (!weak_ptr)
@@ -322,7 +314,13 @@ MessagePump* ThreadControllerImpl::GetBoundMessagePump() const {
 void ThreadControllerImpl::AttachToMessagePump() {
   NOTREACHED();
 }
-#endif
+#endif  // OS_IOS || OS_ANDROID
+
+#if defined(OS_IOS)
+void ThreadControllerImpl::DetachFromMessagePump() {
+  NOTREACHED();
+}
+#endif  // OS_IOS
 
 }  // namespace internal
 }  // namespace sequence_manager

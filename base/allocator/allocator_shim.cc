@@ -9,9 +9,10 @@
 #include <atomic>
 #include <new>
 
+#include "base/allocator/buildflags.h"
 #include "base/atomicops.h"
 #include "base/bits.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/macros.h"
 #include "base/process/process_metrics.h"
 #include "base/threading/platform_thread.h"
@@ -66,16 +67,8 @@ bool CallNewHandler(size_t size) {
 }
 
 inline const base::allocator::AllocatorDispatch* GetChainHead() {
-  // TODO(primiano): Just use NoBarrier_Load once crbug.com/593344 is fixed.
-  // Unfortunately due to that bug NoBarrier_Load() is mistakenly fully
-  // barriered on Linux+Clang, and that causes visible perf regressons.
   return reinterpret_cast<const base::allocator::AllocatorDispatch*>(
-#if defined(OS_LINUX) && defined(__clang__)
-      *static_cast<const volatile base::subtle::AtomicWord*>(&g_chain_head)
-#else
-      base::subtle::NoBarrier_Load(&g_chain_head)
-#endif
-  );
+      base::subtle::NoBarrier_Load(&g_chain_head));
 }
 
 }  // namespace
@@ -351,7 +344,7 @@ ALWAYS_INLINE void ShimAlignedFree(void* address, void* context) {
 // In the case of tcmalloc we also want to plumb into the glibc hooks
 // to avoid that allocations made in glibc itself (e.g., strdup()) get
 // accidentally performed on the glibc heap instead of the tcmalloc one.
-#if defined(USE_TCMALLOC)
+#if BUILDFLAG(USE_TCMALLOC)
 #include "base/allocator/allocator_shim_override_glibc_weak_symbols.h"
 #endif
 

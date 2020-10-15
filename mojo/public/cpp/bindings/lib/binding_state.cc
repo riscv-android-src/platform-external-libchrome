@@ -17,9 +17,9 @@ BindingStateBase::BindingStateBase() = default;
 
 BindingStateBase::~BindingStateBase() = default;
 
-void BindingStateBase::AddFilter(std::unique_ptr<MessageReceiver> filter) {
+void BindingStateBase::SetFilter(std::unique_ptr<MessageFilter> filter) {
   DCHECK(endpoint_client_);
-  endpoint_client_->AddFilter(std::move(filter));
+  endpoint_client_->SetFilter(std::move(filter));
 }
 
 bool BindingStateBase::HasAssociatedInterfaces() const {
@@ -36,9 +36,18 @@ void BindingStateBase::ResumeIncomingMethodCallProcessing() {
   router_->ResumeIncomingMethodCallProcessing();
 }
 
-bool BindingStateBase::WaitForIncomingMethodCall(MojoDeadline deadline) {
+bool BindingStateBase::WaitForIncomingMethodCall() {
   DCHECK(router_);
-  return router_->WaitForIncomingMessage(deadline);
+  return router_->WaitForIncomingMessage();
+}
+
+void BindingStateBase::PauseRemoteCallbacksUntilFlushCompletes(
+    PendingFlush flush) {
+  router_->PausePeerUntilFlushCompletes(std::move(flush));
+}
+
+void BindingStateBase::FlushAsync(AsyncFlusher flusher) {
+  router_->FlushAsync(std::move(flusher));
 }
 
 void BindingStateBase::Close() {
@@ -112,11 +121,11 @@ void BindingStateBase::BindInternal(
                  : MultiplexRouter::SINGLE_INTERFACE);
   router_ = new MultiplexRouter(std::move(receiver_state->pipe), config, false,
                                 sequenced_runner);
-  router_->SetMasterInterfaceName(interface_name);
+  router_->SetPrimaryInterfaceName(interface_name);
   router_->SetConnectionGroup(std::move(receiver_state->connection_group));
 
   endpoint_client_.reset(new InterfaceEndpointClient(
-      router_->CreateLocalEndpointHandle(kMasterInterfaceId), stub,
+      router_->CreateLocalEndpointHandle(kPrimaryInterfaceId), stub,
       std::move(request_validator), has_sync_methods,
       std::move(sequenced_runner), interface_version, interface_name));
   endpoint_client_->SetIdleTrackingEnabledCallback(

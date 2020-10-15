@@ -17,7 +17,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/pending_task.h"
 #include "base/task/common/task_annotator.h"
-#include "base/trace_event/trace_event.h"
+// #include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_stub.h"
 
 namespace timers {
 
@@ -48,7 +49,7 @@ std::unique_ptr<SimpleAlarmTimer> SimpleAlarmTimer::CreateInternal(
 }
 
 SimpleAlarmTimer::SimpleAlarmTimer(base::ScopedFD alarm_fd)
-    : alarm_fd_(std::move(alarm_fd)), weak_factory_(this) {}
+    : alarm_fd_(std::move(alarm_fd)) {}
 
 SimpleAlarmTimer::~SimpleAlarmTimer() {
   DCHECK(origin_task_runner_->RunsTasksInCurrentSequence());

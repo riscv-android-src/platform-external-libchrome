@@ -1,22 +1,9 @@
 # This file will be used by emerge in libchrome-XXXX.ebuild to determine the
 # order of applying patches.
 
-# Undo gn_helper sys.path update.
-libchrome-Unpatch-sys.path-update.patch
-
-# Fix timing issue with dbus::ObjectManager.
-# # TODO(bingxue): Remove after libchrome uprev past r684392.
-Connect-to-NameOwnerChanged-signal-when-setting-call.patch
-
 # Remove glib dependency.
 # TODO(hidehiko): Fix the config in AOSP libchrome.
 libchrome-Remove-glib-dependency.patch
-
-# Misc fix to build older crypto library.
-libchrome-Update-crypto.patch
-
-# Enable location source to add function_name
-enable-location-source.patch
 
 # Refer to crbug/1093642 on upstream or abandon these two patches.
 # Add WaitForServiceToBeAvailable back for MockObjectProxy
@@ -24,37 +11,34 @@ WaitForServiceToBeAvailable.patch
 # Add MockObjectManager, which is removed upstream.
 add-mock-object-manager.patch
 
-# TODO(crbug.com/1065504): Remove after uprev to 754979.
-libchrome-fix-integer-overflow-if-microseconds-is-IN.patch
-
 # Add base/{check_op,notreached}.h for cbor
 Add-header-files-base-check_op-notreached-h.patch
 
-# Remove after r758621
-un-internalize-ScopedClearLastError.patch
+# Remove after r802050
+libchrome-fix-integer-overflow-if-microseconds-is-IN.patch
 
 # Solve name conflict with abseil in absl package, when a program in Chromium
 # OS depends on both abseil and libchrome.
 absl-thread-annotation-conflict.patch
 
-# Forward compatibility patch to r78xxxx
-forward-compatibility-dbus.patch
-forward-compatibility-message-pump-type.patch
-forward-compatibility-task-environment.patch
-forward-compatibility-values.patch
+# Diagnostic code for upsteram to investigate crbug/1001171.
+# We don't need.
+revert-crbug-1001171.patch
+
+# Verify MessageLoop migration, and remove it after uprev.
+backward-compatibility.patch
 
 # Remove after uprev to r780000
 py3.patch
-
-# crbug/813112. Remove after uprev to r780000
-0001-Reland-Mojo-Introduce-async-invitation-client-transp.patch
-0002-mojo-Support-clients-rejoining-a-process-network.patch
-
-# Remove after uprev to r755425
-dont_use_deprecated_allocate_overload_in_base_StackContainer.patch
 
 # Remove after uprev to r806816
 android-allow-null-exception-reporter.patch
 
 # Remove after uprev to r807076
 0001-Fix-pending_broker_clients-handling.patch
+
+# Remove after uprev to r798795
+mojo-core-io-runner-subclass.patch
+
+# Remove after crrev.com/c/2377330 is landed.
+keep-deprecated-shared-memory.patch

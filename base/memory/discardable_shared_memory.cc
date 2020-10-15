@@ -10,12 +10,14 @@
 
 #include "base/atomicops.h"
 #include "base/bits.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/memory/discardable_memory.h"
+#include "base/memory/discardable_memory_internal.h"
 #include "base/memory/shared_memory_tracker.h"
 #include "base/numerics/safe_math.h"
 #include "base/process/process_metrics.h"
-#include "base/trace_event/memory_allocator_dump.h"
-#include "base/trace_event/process_memory_dump.h"
+#include "base/tracing_buildflags.h"
 #include "build/build_config.h"
 
 #if defined(OS_POSIX) && !defined(OS_NACL)
@@ -33,10 +35,15 @@
 #endif
 
 #if defined(OS_FUCHSIA)
-#include <lib/zx/vmo.h>
+#include <lib/zx/vmar.h>
 #include <zircon/types.h>
 #include "base/fuchsia/fuchsia_logging.h"
 #endif
+
+#if BUILDFLAG(ENABLE_BASE_TRACING)
+#include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/process_memory_dump.h"
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 
 namespace base {
 namespace {
@@ -113,6 +120,21 @@ SharedState* SharedStateFromSharedMemory(
 size_t AlignToPageSize(size_t size) {
   return bits::Align(size, base::GetPageSize());
 }
+
+#if defined(OS_ANDROID)
+bool UseAshmemUnpinningForDiscardableMemory() {
+  if (!ashmem_device_is_supported())
+    return false;
+
+  // If we are participating in the discardable memory backing trial, only
+  // enable ashmem unpinning when we are in the corresponding trial group.
+  if (base::DiscardableMemoryBackingFieldTrialIsEnabled()) {
+    return base::GetDiscardableMemoryBackingFieldTrialGroup() ==
+           base::DiscardableMemoryTrialGroup::kAshmem;
+  }
+  return true;
+}
+#endif  // defined(OS_ANDROID)
 
 }  // namespace
 
@@ -423,10 +445,14 @@ bool DiscardableSharedMemory::Purge(Time current_time) {
     CHECK(ptr);
   }
 #elif defined(OS_FUCHSIA)
-  zx::unowned_vmo vmo = shared_memory_region_.GetPlatformHandle();
-  zx_status_t status =
-      vmo->op_range(ZX_VMO_OP_DECOMMIT, AlignToPageSize(sizeof(SharedState)),
-                    AlignToPageSize(mapped_size_), nullptr, 0);
+  // De-commit via our VMAR, rather than relying on the VMO handle, since the
+  // handle may have been closed after the memory was mapped into this process.
+  uint64_t address_int = reinterpret_cast<uint64_t>(
+      static_cast<char*>(shared_memory_mapping_.memory()) +
+      AlignToPageSize(sizeof(SharedState)));
+  zx_status_t status = zx::vmar::root_self()->op_range(
+      ZX_VMO_OP_DECOMMIT, address_int, AlignToPageSize(mapped_size_), nullptr,
+      0);
   ZX_DCHECK(status == ZX_OK, status) << "zx_vmo_op_range(ZX_VMO_OP_DECOMMIT)";
 #endif  // defined(OS_FUCHSIA)
 
@@ -461,6 +487,8 @@ void DiscardableSharedMemory::CreateSharedMemoryOwnershipEdge(
     trace_event::MemoryAllocatorDump* local_segment_dump,
     trace_event::ProcessMemoryDump* pmd,
     bool is_owned) const {
+// Memory dumps are only supported when tracing support is enabled,.
+#if BUILDFLAG(ENABLE_BASE_TRACING)
   auto* shared_memory_dump = SharedMemoryTracker::GetOrCreateSharedMemoryDump(
       shared_memory_mapping_, pmd);
   // TODO(ssid): Clean this by a new api to inherit size of parent dump once the
@@ -490,6 +518,7 @@ void DiscardableSharedMemory::CreateSharedMemoryOwnershipEdge(
     pmd->CreateSharedMemoryOwnershipEdge(local_segment_dump->guid(),
                                          shared_memory_guid, kImportance);
   }
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 }
 
 // static
@@ -499,7 +528,7 @@ DiscardableSharedMemory::LockResult DiscardableSharedMemory::LockPages(
     size_t length) {
 #if defined(OS_ANDROID)
   if (region.IsValid()) {
-    if (ashmem_device_is_supported()) {
+    if (UseAshmemUnpinningForDiscardableMemory()) {
       int pin_result =
           ashmem_pin_region(region.GetPlatformHandle(), offset, length);
       if (pin_result == ASHMEM_WAS_PURGED)
@@ -519,7 +548,7 @@ void DiscardableSharedMemory::UnlockPages(
     size_t length) {
 #if defined(OS_ANDROID)
   if (region.IsValid()) {
-    if (ashmem_device_is_supported()) {
+    if (UseAshmemUnpinningForDiscardableMemory()) {
       int unpin_result =
           ashmem_unpin_region(region.GetPlatformHandle(), offset, length);
       DCHECK_EQ(0, unpin_result);
@@ -535,7 +564,7 @@ Time DiscardableSharedMemory::Now() const {
 #if defined(OS_ANDROID)
 // static
 bool DiscardableSharedMemory::IsAshmemDeviceSupportedForTesting() {
-  return ashmem_device_is_supported();
+  return UseAshmemUnpinningForDiscardableMemory();
 }
 #endif
 

@@ -21,6 +21,7 @@
 #include "base/logging.h"
 // Unused, and this file is not ported to libchrome.
 // #include "base/nix/xdg_util.h"
+#include "base/notreached.h"
 #include "base/path_service.h"
 #include "base/process/process_metrics.h"
 #include "build/build_config.h"

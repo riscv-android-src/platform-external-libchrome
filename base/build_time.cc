@@ -4,6 +4,7 @@
 
 #include "base/build_time.h"
 
+#include "base/check.h"
 #include "base/logging.h"
 #include "base/time/time.h"
 
@@ -28,7 +29,7 @@ Time GetBuildTime() {
 #else
   const char kDateTime[] = __DATE__ " " __TIME__ " PST";
 #endif
-  bool result = Time::FromString(kDateTime, &integral_build_time);
+  bool result = Time::FromUTCString(kDateTime, &integral_build_time);
   DCHECK(result);
   return integral_build_time;
 }

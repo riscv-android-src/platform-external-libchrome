@@ -28,7 +28,7 @@ PolicyDetailsMap::PolicyDetailsMap() {}
 PolicyDetailsMap::~PolicyDetailsMap() {}
 
 GetChromePolicyDetailsCallback PolicyDetailsMap::GetCallback() const {
-  return base::Bind(&PolicyDetailsMap::Lookup, base::Unretained(this));
+  return base::BindRepeating(&PolicyDetailsMap::Lookup, base::Unretained(this));
 }
 
 void PolicyDetailsMap::SetDetails(const std::string& policy,
@@ -47,7 +47,7 @@ bool PolicyServiceIsEmpty(const PolicyService* service) {
   if (!map.empty()) {
     base::DictionaryValue dict;
     for (auto it = map.begin(); it != map.end(); ++it)
-      dict.SetKey(it->first, it->second.value->Clone());
+      dict.SetKey(it->first, it->second.value()->Clone());
     LOG(WARNING) << "There are pre-existing policies in this machine: " << dict;
   }
   return map.empty();
@@ -204,7 +204,7 @@ std::ostream& operator<<(std::ostream& os, const policy::PolicyMap::Entry& e) {
   return os << "{" << std::endl
             << "  \"level\": " << e.level << "," << std::endl
             << "  \"scope\": " << e.scope << "," << std::endl
-            << "  \"value\": " << *e.value << "}";
+            << "  \"value\": " << *e.value() << "}";
 }
 
 std::ostream& operator<<(std::ostream& os, const policy::PolicyNamespace& ns) {
