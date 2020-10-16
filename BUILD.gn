@@ -79,7 +79,6 @@ config("policy_export_config") {
 libbase_sublibs = [
   {
     name = "base-core"
-    output_name = name + "-${libbase_ver}"
     libs = [
       "double-conversion",
       "pthread",
@@ -355,7 +354,6 @@ libbase_sublibs = [
 
   {
     name = "base-dl"
-    output_name = name + "-${libbase_ver}"
     deps = [ ":base-core" ]
     libs = [ "dl" ]
     configs = [ ":base_export_config" ]
@@ -370,7 +368,6 @@ libbase_sublibs = [
 
   {
     name = "base-policy"
-    output_name = name + "-${libbase_ver}"
     deps = [ ":base-core" ]
     libs = [ "re2" ]
     configs = [ ":policy_export_config" ]
@@ -384,7 +381,6 @@ libbase_sublibs = [
 
   {
     name = "base-base_test_support"
-    output_name = name + "-${libbase_ver}"
     testonly = true
     sources = [
       "base/test/bind_test_util.cc",
@@ -407,7 +403,6 @@ if (use.crypto) {
   libbase_sublibs += [
     {
       name = "base-crypto"
-      output_name = name + "-${libbase_ver}"
       deps = [
         ":base-core",
         ":base-dl",
@@ -450,7 +445,6 @@ if (use.dbus) {
   libbase_sublibs += [
     {
       name = "base-dbus"
-      output_name = name + "-${libbase_ver}"
       deps = [ ":base-core" ]
       pkg_deps = [ "dbus-1" ]
       if (use.fuzzer) {
@@ -477,7 +471,6 @@ if (use.dbus) {
 
     {
       name = "base-dbus_test_support"
-      output_name = name + "-${libbase_ver}"
       testonly = true
       pkg_deps = [ "dbus-1" ]
       if (use.fuzzer) {
@@ -499,7 +492,6 @@ if (use.timers) {
   libbase_sublibs += [
     {
       name = "base-timers"
-      output_name = name + "-${libbase_ver}"
       deps = [ ":base-core" ]
       configs = [ "//common-mk:visibility_default" ]
       sources = [ "components/timers/alarm_timer_chromeos.cc" ]
@@ -507,7 +499,6 @@ if (use.timers) {
 
     {
       name = "base-timer_test_support"
-      output_name = name + "-${libbase_ver}"
       testonly = true
       sources = [ "base/timer/mock_timer.cc" ]
     },
@@ -529,7 +520,6 @@ foreach(attr, libbase_sublibs) {
     buildtype = "shared_library"
   }
   target(buildtype, attr.name) {
-    output_name = attr.output_name
     sources = attr.sources
     if (defined(attr.deps)) {
       deps = attr.deps
@@ -564,7 +554,7 @@ action("base") {
   }
 
   script = "//common-mk/write_args.py"
-  outputs = [ "${root_out_dir}/lib/lib${target_name}-${libbase_ver}.so" ]
+  outputs = [ "${root_out_dir}/lib/lib${target_name}.so" ]
   args = [ "--output" ] + outputs + [ "--" ] + [
            "GROUP",
            "(",
@@ -573,7 +563,7 @@ action("base") {
          ]
   foreach(attr, libbase_sublibs) {
     if (!defined(attr.testonly) || !attr.testonly) {
-      args += [ "-l" + attr.output_name ]
+      args += [ "-l" + attr.name ]
     }
   }
   args += [
@@ -583,6 +573,7 @@ action("base") {
 }
 
 libchrome_exported_cflags = [
+  # TODO: use unversioned include path.
   "-I/usr/include/base-${libbase_ver}",
   "-Wno-unused-local-typedefs",
   "-DBASE_VER=${libbase_ver}",
@@ -594,7 +585,6 @@ if (use.asan) {
 
 generate_pkg_config("libchrome") {
   deps = [ ":base" ]
-  output_name = "libchrome-${libbase_ver}"
   description = "chrome base library"
   version = "${libbase_ver}"
   requires_private = []
@@ -603,11 +593,11 @@ generate_pkg_config("libchrome") {
       requires_private += attr.pkg_deps
     }
   }
-  libs = [ "-lbase-${libbase_ver}" ]
+  libs = [ "-lbase" ]
   libs_private = []
   foreach(attr, libbase_sublibs) {
     if (!defined(attr.testonly) || !attr.testonly) {
-      libs_private += [ "-l" + attr.output_name ]
+      libs_private += [ "-l" + attr.name ]
       if (defined(attr.libs)) {
         foreach(lib, attr.libs) {
           libs_private += [ "-l" + lib ]
@@ -627,7 +617,7 @@ action("base-test") {
   }
 
   script = "//common-mk/write_args.py"
-  outputs = [ "${root_out_dir}/lib${target_name}-${libbase_ver}.a" ]
+  outputs = [ "${root_out_dir}/lib${target_name}.a" ]
   args = [ "--output" ] + outputs + [ "--" ] + [
            "GROUP",
            "(",
@@ -636,7 +626,7 @@ action("base-test") {
          ]
   foreach(attr, libbase_sublibs) {
     if (defined(attr.testonly) && attr.testonly) {
-      args += [ "-l" + attr.output_name ]
+      args += [ "-l" + attr.name ]
     }
   }
   args += [
@@ -647,7 +637,6 @@ action("base-test") {
 
 generate_pkg_config("libchrome-test") {
   deps = [ ":base-test" ]
-  output_name = "libchrome-test-${libbase_ver}"
   description = "chrome base test library"
   version = "${libbase_ver}"
   requires_private = []
@@ -656,11 +645,11 @@ generate_pkg_config("libchrome-test") {
       requires_private += attr.pkg_deps
     }
   }
-  libs = [ "-lbase-test-${libbase_ver}" ]
+  libs = [ "-lbase-test" ]
   libs_private = []
   foreach(attr, libbase_sublibs) {
     if (defined(attr.testonly) && attr.testonly) {
-      libs_private += [ "-l" + attr.output_name ]
+      libs_private += [ "-l" + attr.name ]
       if (defined(attr.libs)) {
         libs_private += [ "-l" + lib ]
       }
@@ -742,7 +731,6 @@ if (use.mojo) {
   # Probably we should consider build libmojo as a part of libchrome.
   # crbug.com/924035.
   static_library("mojo") {
-    output_name = "mojo-${libbase_ver}"
     deps = [
       ":base-core",
       ":base-crypto",
@@ -903,11 +891,11 @@ if (use.mojo) {
 
   generate_pkg_config("libmojo") {
     deps = [ ":mojo" ]
-    output_name = "libmojo-${libbase_ver}"
     description = "Chrome Mojo IPC library"
     version = "${libbase_ver}"
-    libs = [ "-lmojo-${libbase_ver}" ]
+    libs = [ "-lmojo" ]
     cflags = [
+      # TODO: use unversioned include path.
       "-I/usr/include/base-${libbase_ver}",
       "-Wno-cast-qual",
       "-Wno-cast-align",
