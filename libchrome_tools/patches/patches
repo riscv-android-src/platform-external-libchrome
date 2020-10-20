@@ -11,9 +11,6 @@ WaitForServiceToBeAvailable.patch
 # Add MockObjectManager, which is removed upstream.
 add-mock-object-manager.patch
 
-# Add base/{check_op,notreached}.h for cbor
-Add-header-files-base-check_op-notreached-h.patch
-
 # Remove after r802050
 libchrome-fix-integer-overflow-if-microseconds-is-IN.patch
 
@@ -26,7 +23,7 @@ absl-thread-annotation-conflict.patch
 revert-crbug-1001171.patch
 
 # Verify MessageLoop migration, and remove it after uprev.
-backward-compatibility.patch
+backward-compatibility-message-loop.patch
 
 # Remove after uprev to r780000
 py3.patch
