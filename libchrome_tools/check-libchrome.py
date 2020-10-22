@@ -6,6 +6,8 @@
 Utility to check if deprecated libchrome calls are introduced.
 """
 
+from __future__ import print_function
+
 import os
 import re
 import subprocess
