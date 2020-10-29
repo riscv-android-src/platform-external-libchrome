@@ -16,12 +16,6 @@ import sys
 # BAD_KEYWORDS are mapping from bad_keyword_in_regex to
 # error_msg_if_match_found.
 BAD_KEYWORDS = {
-    b'base::MessageLoop::TYPE_':
-    'Use base::MessagePumpType instead',
-    b'base::MessageLoop(?!Current)':
-    'Use base SingleThreadTaskExecutor instead',
-    b'base/message_loop/message_loop.h':
-    'Use base SingleThreadTaskExecutor instead',
     b'DISALLOW_COPY_AND_ASSIGN':
     'Chromium agreed to return Google C++ style. Use deleted constructor in `public:` manually. See crbug/1010217',
     b'base::DeleteFileRecursively':

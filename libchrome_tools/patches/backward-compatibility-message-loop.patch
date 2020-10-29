@@ -1,7 +1,0 @@
-diff --git a/base/message_loop/message_loop.h b/base/message_loop/message_loop.h
-new file mode 100644
-index 000000000000..cfdbdd1da2ee
---- /dev/null
-+++ base/message_loop/message_loop.h
-@@ -0,0 +1,1 @@
-+// Intentially left empty until all #include ...message_loop.h are removed.

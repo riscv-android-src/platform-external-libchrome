@@ -22,9 +22,6 @@ absl-thread-annotation-conflict.patch
 # We don't need.
 revert-crbug-1001171.patch
 
-# Verify MessageLoop migration, and remove it after uprev.
-backward-compatibility-message-loop.patch
-
 # Remove after uprev to r780000
 py3.patch
 
