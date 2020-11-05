@@ -23,6 +23,8 @@ BAD_KEYWORDS = {
     'Use base SingleThreadTaskExecutor instead',
     b'base/message_loop/message_loop.h':
     'Use base SingleThreadTaskExecutor instead',
+    b'DISALLOW_COPY_AND_ASSIGN':
+    'Chromium agreed to return Google C++ style. Use deleted constructor in `public:` manually. See crbug/1010217',
 }
 
 
