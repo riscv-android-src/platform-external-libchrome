@@ -36,6 +36,3 @@ android-allow-null-exception-reporter.patch
 
 # Remove after uprev to r798795
 mojo-core-io-runner-subclass.patch
-
-# Remove after crrev.com/c/2377330 is landed.
-keep-deprecated-shared-memory.patch
