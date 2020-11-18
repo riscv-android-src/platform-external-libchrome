@@ -25,6 +25,8 @@ BAD_KEYWORDS = {
     'Use base SingleThreadTaskExecutor instead',
     b'DISALLOW_COPY_AND_ASSIGN':
     'Chromium agreed to return Google C++ style. Use deleted constructor in `public:` manually. See crbug/1010217',
+    b'base::DeleteFileRecursively':
+    'Use base::DeletePathRecursively instead',
 }
 
 

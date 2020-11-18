@@ -28,6 +28,9 @@ backward-compatibility-message-loop.patch
 # Remove after uprev to r780000
 py3.patch
 
+# Remove after uprev to r784327
+forward-compatibility-file-util.patch
+
 # Remove after uprev to r806816
 android-allow-null-exception-reporter.patch
 
