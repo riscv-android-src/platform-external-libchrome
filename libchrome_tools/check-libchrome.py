@@ -27,6 +27,8 @@ BAD_KEYWORDS = {
     'Chromium agreed to return Google C++ style. Use deleted constructor in `public:` manually. See crbug/1010217',
     b'base::DeleteFileRecursively':
     'Use base::DeletePathRecursively instead',
+    b'LOG_(VERBOSE|INFO|WARNING|ERROR|FATAL|NUM_SEVERITIES|DFATAL)':
+    'Use LOGGING_* instead',
 }
 
 
