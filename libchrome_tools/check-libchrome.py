@@ -13,7 +13,6 @@ import re
 import subprocess
 import sys
 
-
 # BAD_KEYWORDS are mapping from bad_keyword_in_regex to
 # error_msg_if_match_found.
 BAD_KEYWORDS = {
@@ -34,8 +33,8 @@ BAD_KEYWORDS = {
 }
 
 
-def main():
-    files = os.environ['PRESUBMIT_FILES'].split('\n')
+def check(environ=os.environ, keywords=BAD_KEYWORDS):
+    files = environ['PRESUBMIT_FILES'].split('\n')
 
     errors = []
 
@@ -43,12 +42,12 @@ def main():
         if not (f.endswith('.h') or f.endswith('.cc')):
             continue
         diff = subprocess.check_output(
-            ['git', 'show', '--oneline', os.environ['PRESUBMIT_COMMIT'],
+            ['git', 'show', '--oneline', environ['PRESUBMIT_COMMIT'],
              f]).split(b'\n')
         for line in diff:
             if not line.startswith(b'+'):
                 continue
-            for bad_pattern, error_message in BAD_KEYWORDS.items():
+            for bad_pattern, error_message in keywords.items():
                 m = re.search(bad_pattern, line)
                 if m:
                     errors.append('In File %s, found %s (pattern: %s), %s' %
@@ -56,6 +55,11 @@ def main():
                                    error_message))
                     break
 
+    return errors
+
+
+def main():
+    errors = check()
     if errors:
         print('\n'.join(errors), file=sys.stderr)
         sys.exit(1)
