@@ -2,7 +2,6 @@
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """
 Utility to copy missing files from Chromium tree to Chromium OS libchrome tree
 based on hard coded rules.
@@ -22,22 +21,20 @@ import sys
 import filters
 import utils
 
+
 def main():
     # Init args
-    parser = argparse.ArgumentParser(
-        description='Copy file from given commits')
-    parser.add_argument(
-        'commit_hash',
-        metavar='commit',
-        type=str,
-        nargs=1,
-        help='commit hash to copy files from')
-    parser.add_argument(
-        '--dry_run',
-        dest='dry_run',
-        action='store_const',
-        const=True,
-        default=False)
+    parser = argparse.ArgumentParser(description='Copy file from given commits')
+    parser.add_argument('commit_hash',
+                        metavar='commit',
+                        type=str,
+                        nargs=1,
+                        help='commit hash to copy files from')
+    parser.add_argument('--dry_run',
+                        dest='dry_run',
+                        action='store_const',
+                        const=True,
+                        default=False)
     arg = parser.parse_args(sys.argv[1:])
 
     # Read file list from HEAD and upstream commit.
@@ -69,6 +66,7 @@ def main():
                                       stdout=outfile)
             # Add to git index
             subprocess.check_call(['git', 'add', f.path])
+
 
 if __name__ == '__main__':
     main()

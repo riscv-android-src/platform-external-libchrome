@@ -8,7 +8,6 @@ import subprocess
 
 import utils
 
-
 GIT_LSTREE_RE_LINE = re.compile(rb'^([^ ]*) ([^ ]*) ([^ ]*)\t(.*)$')
 
 
@@ -25,9 +24,9 @@ class LazyTree:
                 later.
         """
         if treehash:
-            self._treehash = treehash # tree object id of current tree
-            self._subtrees = None # map from directory name to sub LazyTree
-            self._files = None # map from file naem to utils.GitFile
+            self._treehash = treehash  # tree object id of current tree
+            self._subtrees = None  # map from directory name to sub LazyTree
+            self._files = None  # map from file naem to utils.GitFile
             return
         # Initialize an empty LazyTree
         self._treehash = None
@@ -36,9 +35,10 @@ class LazyTree:
 
     def _loadtree(self):
         """Loads _treehash into _subtrees and _files."""
-        if self._files is not None: # _subtrees is also not None too here.
+        if self._files is not None:  # _subtrees is also not None too here.
             return
-        output = subprocess.check_output(['git', 'ls-tree', self._treehash]).split(b'\n')
+        output = subprocess.check_output(['git', 'ls-tree',
+                                          self._treehash]).split(b'\n')
         self._files = {}
         self._subtrees = {}
         for line in output:
@@ -159,11 +159,10 @@ class LazyTree:
         for name in sorted(keys):
             file = self._files.get(name)
             if file:
-                mktree_input.append(b'%s blob %s\t%s' % (file.mode, file.id,
-                                                         name))
+                mktree_input.append(b'%s blob %s\t%s' %
+                                    (file.mode, file.id, name))
             else:
-                mktree_input.append(
-                    b'040000 tree %s\t%s' % (self._subtrees[name].hash(), name))
+                mktree_input.append(b'040000 tree %s\t%s' %
+                                    (self._subtrees[name].hash(), name))
         return subprocess.check_output(
-            ['git', 'mktree'],
-            input=b'\n'.join(mktree_input)).strip(b'\n')
+            ['git', 'mktree'], input=b'\n'.join(mktree_input)).strip(b'\n')

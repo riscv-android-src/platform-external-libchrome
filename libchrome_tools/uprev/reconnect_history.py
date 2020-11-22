@@ -2,7 +2,6 @@
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """
 Utility to disconnect history of files from a branch, and reconnect with base on
 a different branch.
@@ -42,9 +41,9 @@ def disconnect(source_commit, ref_commit):
     ref_files_set = set(ref.path for ref in ref_files)
     kept_files = [ref for ref in source_files if ref.path not in ref_files_set]
     tree = utils.git_mktree(kept_files)
-    return utils.git_commit(
-        tree, [source_commit],
-        message=b'Disconnect history from %s' % (source_commit.encode('ascii')))
+    return utils.git_commit(tree, [source_commit],
+                            message=b'Disconnect history from %s' %
+                            (source_commit.encode('ascii')))
 
 
 def connect_base(current_commit, base_commit):
@@ -59,9 +58,9 @@ def connect_base(current_commit, base_commit):
     current_files = utils.get_file_list(current_commit)
     base_files = utils.get_file_list(base_commit)
     tree = utils.git_mktree(current_files + base_files)
-    return utils.git_commit(
-        tree, [current_commit, base_commit],
-        message=b'Connect history with base %s' % (base_commit.encode('ascii')))
+    return utils.git_commit(tree, [current_commit, base_commit],
+                            message=b'Connect history with base %s' %
+                            (base_commit.encode('ascii')))
 
 
 def blame_files(commithash, files):
@@ -127,16 +126,16 @@ def get_track_from_blames(blames_combined, virtual_goal_commit, amend_commits,
             chosen = commit_choice_cache.get(original_commits)
             if chosen is None:
                 for idx, original_commit in enumerate(original_commits):
-                    print('%d: %s' % (idx,
-                                      commit_msg_cache[original_commit].title))
+                    print('%d: %s' %
+                          (idx, commit_msg_cache[original_commit].title))
                 # No validation on user_choice since no untrusted user.
                 # Also the developer can rerun if entered wrongly by accident.
                 user_choice = int(input('Choose patch: '))
                 chosen = original_commits[user_choice]
                 commit_choice_cache[original_commits] = chosen
             commits_to_track.add(chosen)
-            blame_untracked_lines[blame_file_path].append((blame_line[0],
-                                                           chosen))
+            blame_untracked_lines[blame_file_path].append(
+                (blame_line[0], chosen))
 
     return commits_to_track, blame_untracked_lines
 
@@ -166,7 +165,7 @@ def reconstruct_file(blame_goal, blame_base, lines_to_reconstruct,
     print('Changed lines are', [line.data for line in lines_to_reconstruct])
     line_iter = iter(lines_to_reconstruct)
     line = next(line_iter, None)
-    while idx_base < len(blame_base) or idx_goal< len(blame_goal):
+    while idx_base < len(blame_base) or idx_goal < len(blame_goal):
         # Both sides are idendical. We can't compare blame_base, and line
         # directly due to blame commit difference could end up different lineno.
         if (idx_base < len(blame_base) and
@@ -237,24 +236,21 @@ def reconstruct_files(track_commit, blame_untracked_lines, blames,
 def main():
     # Init args
     parser = argparse.ArgumentParser(description='Reconnect git history')
-    parser.add_argument(
-        'disconnect_from',
-        metavar='disconnect_from',
-        type=str,
-        nargs=1,
-        help='disconnect history from this commit')
-    parser.add_argument(
-        'base_commit',
-        metavar='base_commit',
-        type=str,
-        nargs=1,
-        help='base commit to use the history')
-    parser.add_argument(
-        'amend_commits',
-        metavar='amend_commits',
-        type=str,
-        nargs='+',
-        help='commits to amend histories from base_commit')
+    parser.add_argument('disconnect_from',
+                        metavar='disconnect_from',
+                        type=str,
+                        nargs=1,
+                        help='disconnect history from this commit')
+    parser.add_argument('base_commit',
+                        metavar='base_commit',
+                        type=str,
+                        nargs=1,
+                        help='base commit to use the history')
+    parser.add_argument('amend_commits',
+                        metavar='amend_commits',
+                        type=str,
+                        nargs='+',
+                        help='commits to amend histories from base_commit')
 
     arg = parser.parse_args(sys.argv[1:])
     empty_commit = disconnect(arg.disconnect_from[0], arg.base_commit[0])
@@ -284,8 +280,7 @@ def main():
                   (last_commit.decode('ascii'),))
             break
 
-        blames = blame_files(virtual_goal,
-                             [diff.file.path for diff in diffs])
+        blames = blame_files(virtual_goal, [diff.file.path for diff in diffs])
         blames_combined = search_blame_line(blames, arg.amend_commits,
                                             virtual_goal)
 
@@ -315,11 +310,10 @@ def main():
         last_commit = utils.git_commit(
             tree.hash(), [last_commit],
             (meta.message + b'\n(Reconstructed from ' + track_commit + b')\n'),
-            dict(
-                GIT_AUTHOR_NAME=meta.authorship.name,
-                GIT_AUTHOR_EMAIL=meta.authorship.email,
-                GIT_AUTHOR_DATE=b' '.join(
-                    [meta.authorship.time, meta.authorship.timezone])))
+            dict(GIT_AUTHOR_NAME=meta.authorship.name,
+                 GIT_AUTHOR_EMAIL=meta.authorship.email,
+                 GIT_AUTHOR_DATE=b' '.join(
+                     [meta.authorship.time, meta.authorship.timezone])))
         print('Reconstructed as', last_commit)
     # Make last commit for history reconstruction.
     print(

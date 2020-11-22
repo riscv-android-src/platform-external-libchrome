@@ -102,15 +102,15 @@ def do_commit(treehash, commithash, meta, commits_map):
         parents_parameters.append('-p')
         parents_parameters.append(find_filtered_commit(parent, commits_map))
     msg = (meta.message + b'\n\n' +
-           filtered_utils.CROS_LIBCHROME_ORIGINAL_COMMIT +
-           b': ' + commithash + b'\n')
+           filtered_utils.CROS_LIBCHROME_ORIGINAL_COMMIT + b': ' + commithash +
+           b'\n')
     return subprocess.check_output(
         ['git', 'commit-tree'] + parents_parameters + [treehash],
         env=dict(os.environ,
                  GIT_AUTHOR_NAME=meta.authorship.name,
                  GIT_AUTHOR_EMAIL=meta.authorship.email,
-                 GIT_AUTHOR_DATE=b' '.join([meta.authorship.time,
-                                            meta.authorship.timezone])),
+                 GIT_AUTHOR_DATE=b' '.join(
+                     [meta.authorship.time, meta.authorship.timezone])),
         input=msg).strip(b'\n')
 
 
@@ -121,11 +121,13 @@ def verify_commit(original_commit, new_tree):
         original_commit: commit hash in Chromium browser tree.
         new_tree: tree hash created for upstream branch commit.
     """
-    expected_file_list = filters.filter_file([], utils.get_file_list(original_commit))
+    expected_file_list = filters.filter_file(
+        [], utils.get_file_list(original_commit))
     assert utils.git_mktree(expected_file_list) == new_tree
 
 
-def process_commits(pending_commits, commits_map, progress_callback, commit_callback):
+def process_commits(pending_commits, commits_map, progress_callback,
+                    commit_callback):
     """Processes new commits in browser repository.
 
     Returns the commit hash of the last commit made.
@@ -145,12 +147,13 @@ def process_commits(pending_commits, commits_map, progress_callback, commit_call
         meta = filtered_utils.get_metadata(commit[0])
         if progress_callback:
             progress_callback(i, len(pending_commits), commit[0], meta)
-        diff_with_parent = filters.filter_diff(utils.git_difftree(
-            meta.parents[0] if meta.parents else None, commit[0]))
+        diff_with_parent = filters.filter_diff(
+            utils.git_difftree(meta.parents[0] if meta.parents else None,
+                               commit[0]))
         git_lazytree = lazytree.LazyTree(
-            filtered_utils.get_metadata(
-                find_filtered_commit(meta.parents[0], commits_map)).tree
-            if meta.parents else None)
+            filtered_utils.
+            get_metadata(find_filtered_commit(meta.parents[0], commits_map)
+                        ).tree if meta.parents else None)
         if len(meta.parents) <= 1 and len(diff_with_parent) == 0:
             # not merge commit    AND no diff
             if len(meta.parents) == 1 and meta.parents[0] in commits_map:
@@ -174,22 +177,32 @@ def process_commits(pending_commits, commits_map, progress_callback, commit_call
             last_verified = i
             verify_commit(commit[0], treehash_after_diff_applied)
     # Verify last commit
-    verify_commit(pending_commits[-1][0], filtered_utils.get_metadata(last_commit).tree)
+    verify_commit(pending_commits[-1][0],
+                  filtered_utils.get_metadata(last_commit).tree)
     return last_commit
 
 
 def main():
     # Init args
-    parser = argparse.ArgumentParser(
-        description='Copy file from given commits')
+    parser = argparse.ArgumentParser(description='Copy file from given commits')
     parser.add_argument(
-        'parent_filtered', metavar='parent_filtered', type=str, nargs=1,
-        help='commit hash in filtered branch to continue from. usually HEAD of that branch.')
-    parser.add_argument(
-        'goal_browser', metavar='goal_browser', type=str, nargs=1,
-        help='commit hash in browser master branch.')
-    parser.add_argument(
-        '--dry_run', dest='dry_run', action='store_const', const=True, default=False)
+        'parent_filtered',
+        metavar='parent_filtered',
+        type=str,
+        nargs=1,
+        help=
+        'commit hash in filtered branch to continue from. usually HEAD of that branch.'
+    )
+    parser.add_argument('goal_browser',
+                        metavar='goal_browser',
+                        type=str,
+                        nargs=1,
+                        help='commit hash in browser master branch.')
+    parser.add_argument('--dry_run',
+                        dest='dry_run',
+                        action='store_const',
+                        const=True,
+                        default=False)
     arg = parser.parse_args(sys.argv[1:])
 
     # Look for last known commit made by the script in filtered branch.
@@ -207,17 +220,19 @@ def main():
     print('reading commits details for commits mapping')
     timing_deque = collections.deque([time.time()])
     commits_map = filtered_utils.get_commits_map(
-        arg.parent_filtered[0],
-        lambda cur_idx, tot_cnt, cur_hash:
-        (
-            print('Reading', cur_hash, '%d/%d' % (cur_idx, tot_cnt),
-                  '%f c/s' % timing(timing_deque),
-                  end='\r', flush=True),
-        ))
+        arg.parent_filtered[0], lambda cur_idx, tot_cnt, cur_hash: (print(
+            'Reading',
+            cur_hash,
+            '%d/%d' % (cur_idx, tot_cnt),
+            '%f c/s' % timing(timing_deque),
+            end='\r',
+            flush=True),))
     if not 'ROOT' in commits_map:
-        commits_map['ROOT'] =subprocess.check_output(
-            ['git', 'commit-tree', '-p', arg.parent_filtered[0],
-             utils.git_mktree([])],
+        commits_map['ROOT'] = subprocess.check_output(
+            [
+                'git', 'commit-tree', '-p', arg.parent_filtered[0],
+                utils.git_mktree([])
+            ],
             input=filtered_utils.CROS_LIBCHROME_INITIAL_COMMIT).strip(b'\n')
     print()
     print('loaded commit mapping of', len(commits_map), 'commit')
@@ -225,7 +240,7 @@ def main():
     # Process newer commits in browser repository from
     # last_known.original_commits
     print('search for commits to filter')
-    timing_deque= collections.deque([time.time()])
+    timing_deque = collections.deque([time.time()])
     pending_commits = utils.git_revlist(
         meta_last_known.original_commits[0] if meta_last_known else None,
         arg.goal_browser[0])
@@ -234,21 +249,20 @@ def main():
         pending_commits,
         commits_map,
         # Print progress
-        lambda cur_idx, tot_cnt, cur_hash, cur_meta: (
-            print('Processing',
-                  cur_hash, '%d/%d' % (cur_idx, tot_cnt),
-                  '%f c/s' % timing(timing_deque, update=False),
-                  'eta %s' % (
-                      datetime.timedelta(
-                          seconds=int((tot_cnt - cur_idx) / timing(timing_deque)))),
-                  cur_meta.title[:50],
-                  end='\r', flush=True),
-        ),
+        lambda cur_idx, tot_cnt, cur_hash, cur_meta: (print(
+            'Processing',
+            cur_hash,
+            '%d/%d' % (cur_idx, tot_cnt),
+            '%f c/s' % timing(timing_deque, update=False),
+            'eta %s' % (datetime.timedelta(seconds=int((tot_cnt - cur_idx) /
+                                                       timing(timing_deque)))),
+            cur_meta.title[:50],
+            end='\r',
+            flush=True),),
         # Print new commits
-        lambda orig_hash, new_hash, commit_meta:
-            print(b'%s is commited as %s: %s' % (orig_hash, new_hash,
-                                                 commit_meta.title[:50]))
-    )
+        lambda orig_hash, new_hash, commit_meta: print(
+            b'%s is commited as %s: %s' % (orig_hash, new_hash, commit_meta.
+                                           title[:50])))
     print()
     print('New HEAD should be', new_head.decode('ascii'))
 

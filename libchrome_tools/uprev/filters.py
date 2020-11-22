@@ -1,7 +1,6 @@
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """Provide filters for libchrome tools."""
 
 import re
@@ -14,7 +13,8 @@ WANT = [
         rb'base/allocator/(allocator_shim.cc|allocator_shim_override_linker_wrapped_symbols.h|allocator_shim_override_cpp_symbols.h|allocator_shim_override_libc_symbols.h|allocator_shim_default_dispatch_to_glibc.cc|allocator_shim.h|allocator_shim_default_dispatch_to_linker_wrapped_symbols.cc|allocator_extension.cc|allocator_extension.h|allocator_shim_internals.h)$'
     ),
     re.compile(rb'base/third_party/(dynamic_annotation|icu|nspr|valgrind)'),
-    re.compile(rb'build/(android/(gyp/util|pylib/([^/]*$|constants))|[^/]*\.(h|py)$)'),
+    re.compile(
+        rb'build/(android/(gyp/util|pylib/([^/]*$|constants))|[^/]*\.(h|py)$)'),
     re.compile(rb'mojo/'),
     re.compile(rb'dbus/'),
     re.compile(rb'ipc/.*(\.cc|\.h|\.mojom)$'),
@@ -106,10 +106,10 @@ def filter_file(our_files, upstream_files):
 
     files = []
     for upstream_file in upstream_files:
-      if _want_file(upstream_file.path):
+        if _want_file(upstream_file.path):
             files.append(upstream_file)
     for our_file in our_files:
-      if _keep_file(our_file.path):
+        if _keep_file(our_file.path):
             files.append(our_file)
     return files
 

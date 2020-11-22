@@ -2,7 +2,6 @@
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """
 Utility to apply diffs between given two upstream commit hashes to current
 workspace.
@@ -21,23 +20,35 @@ import sys
 import filters
 import utils
 
+
 def main():
     # Init args
-    parser = argparse.ArgumentParser(
-        description='Copy file from given commits')
+    parser = argparse.ArgumentParser(description='Copy file from given commits')
     parser.add_argument(
-        'old_commit', metavar='old_commit', type=str, nargs=1,
+        'old_commit',
+        metavar='old_commit',
+        type=str,
+        nargs=1,
         help='commit hash in upstream branch or browser repository '
-             'we want to uprev from')
+        'we want to uprev from')
     parser.add_argument(
-        'new_commit', metavar='new_commit', type=str, nargs=1,
+        'new_commit',
+        metavar='new_commit',
+        type=str,
+        nargs=1,
         help='commit hash in upstream branch or browser repository '
-             'we want ot uprev to')
-    parser.add_argument(
-        '--dry_run', dest='dry_run', action='store_const', const=True, default=False)
-    parser.add_argument(
-        '--is_browser', dest='is_browser', action='store_const', const=True, default=False,
-        help='is the commit hash in browser repository')
+        'we want ot uprev to')
+    parser.add_argument('--dry_run',
+                        dest='dry_run',
+                        action='store_const',
+                        const=True,
+                        default=False)
+    parser.add_argument('--is_browser',
+                        dest='is_browser',
+                        action='store_const',
+                        const=True,
+                        default=False,
+                        help='is the commit hash in browser repository')
     arg = parser.parse_args(sys.argv[1:])
 
     # Get old and new files.
@@ -57,7 +68,8 @@ def main():
     squashed = utils.git_commit(new_tree, [newroot])
 
     # Generate patch for git am
-    patch = subprocess.check_output(['git', 'format-patch', '--stdout', newroot+b'..'+squashed])
+    patch = subprocess.check_output(
+        ['git', 'format-patch', '--stdout', newroot + b'..' + squashed])
 
     if arg.dry_run:
         print(patch.decode('utf-8'))

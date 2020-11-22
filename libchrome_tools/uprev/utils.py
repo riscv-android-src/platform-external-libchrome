@@ -1,7 +1,6 @@
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """Provide some basic utility functions for libchrome tools."""
 
 import collections
@@ -9,6 +8,7 @@ import enum
 import os
 import re
 import subprocess
+
 
 class DiffOperations(enum.Enum):
     """
@@ -18,23 +18,27 @@ class DiffOperations(enum.Enum):
     DEL = 2
     REP = 3
 
-GitFile = collections.namedtuple(
-    'GitFile',
-    ['path', 'mode', 'id',]
-)
 
-GitDiffTree = collections.namedtuple(
-    'GitDiffTree',
-    ['op', 'file',]
-)
+GitFile = collections.namedtuple('GitFile', [
+    'path',
+    'mode',
+    'id',
+])
 
-GitBlameLine = collections.namedtuple(
-    'GitBlameLine',
-    ['data', 'commit', 'old_line', 'new_line',]
-)
+GitDiffTree = collections.namedtuple('GitDiffTree', [
+    'op',
+    'file',
+])
 
+GitBlameLine = collections.namedtuple('GitBlameLine', [
+    'data',
+    'commit',
+    'old_line',
+    'new_line',
+])
 
-GIT_DIFFTREE_RE_LINE = re.compile(rb'^:([^ ]*) ([^ ]*) ([^ ]*) ([^ ]*) ([^ ]*)\t(.*)$')
+GIT_DIFFTREE_RE_LINE = re.compile(
+    rb'^:([^ ]*) ([^ ]*) ([^ ]*) ([^ ]*) ([^ ]*)\t(.*)$')
 
 
 def _reverse(files):
@@ -96,8 +100,8 @@ def git_difftree(treeish1, treeish2):
         out = subprocess.check_output(['git', 'diff-tree', '-r',
                                        treeish2]).split(b'\n')[1:]
     else:
-        out = subprocess.check_output(['git', 'diff-tree', '-r',
-                                       treeish1, treeish2]).split(b'\n')
+        out = subprocess.check_output(
+            ['git', 'diff-tree', '-r', treeish1, treeish2]).split(b'\n')
     diff = []
     for line in out:
         if not line:
@@ -107,16 +111,16 @@ def git_difftree(treeish1, treeish2):
         assert typeofchange in b'ADMT', (treeish1, treeish2, line)
         if typeofchange == b'A':
             diff.append(
-                GitDiffTree(DiffOperations.ADD,
-                            GitFile(path, newmode, newhash)))
+                GitDiffTree(DiffOperations.ADD, GitFile(path, newmode,
+                                                        newhash)))
         elif typeofchange == b'D':
             diff.append(
-                GitDiffTree(DiffOperations.DEL,
-                            GitFile(path, oldmode, oldhash)))
+                GitDiffTree(DiffOperations.DEL, GitFile(path, oldmode,
+                                                        oldhash)))
         elif typeofchange == b'M' or typeofchange == b'T':
             diff.append(
-                GitDiffTree(DiffOperations.REP,
-                            GitFile(path, newmode, newhash)))
+                GitDiffTree(DiffOperations.REP, GitFile(path, newmode,
+                                                        newhash)))
         else:
             raise Exception(b"Unsupported type: " + line)
     return diff
@@ -198,10 +202,10 @@ def git_commit(tree, parents, message=b"", extra_env={}):
     for parent in parents:
         parent_args.append('-p')
         parent_args.append(parent)
-    return subprocess.check_output(
-        ['git', 'commit-tree', tree] + parent_args,
-        input=message,
-        env=dict(os.environ, **extra_env)).strip(b'\n')
+    return subprocess.check_output(['git', 'commit-tree', tree] + parent_args,
+                                   input=message,
+                                   env=dict(os.environ,
+                                            **extra_env)).strip(b'\n')
 
 
 def git_revlist(from_commit, to_commit):
@@ -215,8 +219,8 @@ def git_revlist(from_commit, to_commit):
     commits = []
     ret = None
     if from_commit is None:
-        ret = subprocess.check_output(['git', 'rev-list', to_commit,
-                                       '--topo-order', '--parents'])
+        ret = subprocess.check_output(
+            ['git', 'rev-list', to_commit, '--topo-order', '--parents'])
     else:
         # b'...'.join() later requires all variable to be binary-typed.
         if type(from_commit) == str:
@@ -224,8 +228,8 @@ def git_revlist(from_commit, to_commit):
         if type(to_commit) == str:
             to_commit = to_commit.encode('ascii')
         commit_range = b'...'.join([from_commit, to_commit])
-        ret = subprocess.check_output(['git', 'rev-list', commit_range,
-                                       '--topo-order', '--parents'])
+        ret = subprocess.check_output(
+            ['git', 'rev-list', commit_range, '--topo-order', '--parents'])
     ret = ret.split(b'\n')
     for line in ret:
         if not line:
@@ -244,8 +248,7 @@ def git_blame(commit, filepath):
         commit: commit hash to blame at.
         filepath: file to blame.
     """
-    output = subprocess.check_output(['git', 'blame', '-p',
-                                      commit, filepath])
+    output = subprocess.check_output(['git', 'blame', '-p', commit, filepath])
     commit, old_line, new_line = None, None, None
     blames = []
     COMMIT_LINE_PREFIX = re.compile(b'^[0-9a-f]* ')
