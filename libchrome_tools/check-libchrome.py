@@ -29,6 +29,8 @@ BAD_KEYWORDS = {
     'Use base::DeletePathRecursively instead',
     b'LOG_(VERBOSE|INFO|WARNING|ERROR|FATAL|NUM_SEVERITIES|DFATAL)':
     'Use LOGGING_* instead',
+    b'\.(start|end)s_with\(':
+    'BasicStringPiece::{starts,ends}_with will be deprecatd. Use base::{Starts,Ends}With instead',
 }
 
 
