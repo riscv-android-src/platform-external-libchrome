@@ -34,6 +34,9 @@ forward-compatibility-file-util.patch
 # Remove after uprev to r798820
 forward-compatibility-string-utils.patch
 
+# Remove after uprev to r806478
+forward-compatibility-file-lock.patch
+
 # Remove after uprev to r806816
 android-allow-null-exception-reporter.patch
 
