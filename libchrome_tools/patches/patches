@@ -31,6 +31,9 @@ py3.patch
 # Remove after uprev to r784327
 forward-compatibility-file-util.patch
 
+# Remove after uprev to r784774
+forward-compatibility-current-thread.patch
+
 # Remove after uprev to r798820
 forward-compatibility-string-utils.patch
 

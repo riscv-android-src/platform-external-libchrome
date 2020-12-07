@@ -30,6 +30,8 @@ BAD_KEYWORDS = {
     'Use LOGGING_* instead',
     b'\.(start|end)s_with\(':
     'BasicStringPiece::{starts,ends}_with will be deprecatd. Use base::{Starts,Ends}With instead',
+    b'MessageLoopCurrent(|ForIO|ForUI)':
+    'Use base::Current{,IO,UI}Thread instead with header "base/task/current_thread.h"',
 }
 
 
