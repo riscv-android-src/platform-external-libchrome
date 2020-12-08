@@ -1,0 +1,66 @@
+From dbb70eb75b658f085f4474101194f0d5c890c190 Mon Sep 17 00:00:00 2001
+From: hscham <hscham@chromium.org>
+Date: Tue, 8 Dec 2020 10:31:42 +0900
+Subject: [PATCH] mojo: use base::ScopedPlatformFile for
+ mojo::{,Un}WrapPlatformFile
+
+Change-Id: Id880cc2f3ad3e4a98d8f9fa0b05aa972c99eab12
+---
+ mojo/public/cpp/system/platform_handle.cc | 15 +++++++++++++++
+ mojo/public/cpp/system/platform_handle.h  |  3 +++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/mojo/public/cpp/system/platform_handle.cc b/mojo/public/cpp/system/platform_handle.cc
+index 50ba7c9516..e128b5c972 100644
+--- a/mojo/public/cpp/system/platform_handle.cc
++++ b/mojo/public/cpp/system/platform_handle.cc
+@@ -213,6 +213,10 @@ ScopedHandle WrapPlatformFile(base::PlatformFile platform_file) {
+   return ScopedHandle(Handle(mojo_handle));
+ }
+ 
++ScopedHandle WrapPlatformFile(base::ScopedPlatformFile platform_file) {
++  return WrapPlatformFile(platform_file.release());
++}
++
+ MojoResult UnwrapPlatformFile(ScopedHandle handle, base::PlatformFile* file) {
+   MojoPlatformHandle platform_handle;
+   platform_handle.struct_size = sizeof(MojoPlatformHandle);
+@@ -231,6 +235,17 @@ MojoResult UnwrapPlatformFile(ScopedHandle handle, base::PlatformFile* file) {
+   return MOJO_RESULT_OK;
+ }
+ 
++MojoResult UnwrapPlatformFile(ScopedHandle handle,
++                              base::ScopedPlatformFile* file) {
++  base::PlatformFile platform_file;
++  MojoResult result = UnwrapPlatformFile(std::move(handle), &platform_file);
++  if (result != MOJO_RESULT_OK)
++    return result;
++
++  *file = base::ScopedPlatformFile(platform_file);
++  return MOJO_RESULT_OK;
++}
++
+ ScopedSharedBufferHandle WrapReadOnlySharedMemoryRegion(
+     base::ReadOnlySharedMemoryRegion region) {
+   return WrapPlatformSharedMemoryRegion(
+diff --git a/mojo/public/cpp/system/platform_handle.h b/mojo/public/cpp/system/platform_handle.h
+index 297be2263e..60fec5e445 100644
+--- a/mojo/public/cpp/system/platform_handle.h
++++ b/mojo/public/cpp/system/platform_handle.h
+@@ -95,10 +95,13 @@ MOJO_CPP_SYSTEM_EXPORT PlatformHandle UnwrapPlatformHandle(ScopedHandle handle);
+ // If |platform_file| is valid, this will return a valid handle.
+ MOJO_CPP_SYSTEM_EXPORT
+ ScopedHandle WrapPlatformFile(base::PlatformFile platform_file);
++ScopedHandle WrapPlatformFile(base::ScopedPlatformFile platform_file);
+ 
+ // Unwraps a PlatformFile from a Mojo handle.
+ MOJO_CPP_SYSTEM_EXPORT
+ MojoResult UnwrapPlatformFile(ScopedHandle handle, base::PlatformFile* file);
++MojoResult UnwrapPlatformFile(ScopedHandle handle,
++                              base::ScopedPlatformFile* file);
+ 
+ // Helpers for wrapping and unwrapping new base shared memory API primitives.
+ // If the input |region| is valid for the Wrap* functions, they will always
+-- 
+2.29.2.576.ga3fc446d84-goog
+
