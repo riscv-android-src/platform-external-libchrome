@@ -76,6 +76,10 @@ config("policy_export_config") {
   defines = [ "COMPONENT_BUILD", "POLICY_COMPONENT_IMPLEMENTATION" ]
 }
 
+config("mojo_export_config") {
+  defines = [ "COMPONENT_BUILD" ]
+}
+
 libbase_sublibs = [
   {
     name = "base-core"
@@ -742,25 +746,22 @@ if (use.mojo) {
 
   # Probably we should consider build libmojo as a part of libchrome.
   # crbug.com/924035.
-  static_library("mojo") {
+  shared_library("mojo") {
     deps = [
       ":base-core",
       ":base-crypto",
+      ":base-dl",
       ":mojom_bindings_gen",
       # ":mojom_bindings_native_gen",
       # ":mojom_type_mappings",
     ]
+    libs = [ "pthread" ]
 
     # TODO(hidehiko): Consolidate with build_config.h.
-    configs -= [
-      "//common-mk:use_thin_archive",
-      "//common-mk:pie",
-    ]
     configs += [
       ":libchrome_config",
+      ":mojo_export_config",
       "//common-mk:visibility_default",
-      "//common-mk:nouse_thin_archive",
-      "//common-mk:pic",
     ]
     sources =
         [
@@ -772,6 +773,7 @@ if (use.mojo) {
           "ipc/ipc_mojo_message_helper.cc",
           "ipc/ipc_mojo_param_traits.cc",
           "ipc/ipc_platform_file_attachment_posix.cc",
+          "ipc/native_handle_type_converters.cc",
           "mojo/core/broker_host.cc",
           "mojo/core/broker_posix.cc",
           "mojo/core/channel.cc",
