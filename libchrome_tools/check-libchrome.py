@@ -44,7 +44,7 @@ def check(environ=os.environ, keywords=BAD_KEYWORDS):
         if not (f.endswith('.h') or f.endswith('.cc')):
             continue
         diff = subprocess.check_output(
-            ['git', 'show', '--oneline', environ['PRESUBMIT_COMMIT'],
+            ['git', 'show', '--oneline', environ['PRESUBMIT_COMMIT'], '--',
              f]).split(b'\n')
         for line in diff:
             if not line.startswith(b'+'):
