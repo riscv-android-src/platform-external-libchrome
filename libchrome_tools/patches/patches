@@ -49,6 +49,9 @@ android-allow-null-exception-reporter.patch
 # Remove after uprev to r798795
 mojo-core-io-runner-subclass.patch
 
+# Remove after uprev to r811858
+forward-compatibility-base-value.patch
+
 # Remove after uprev to r820304
 forward-compatibility-mojo-un-wrap-platform-file.patch
 
