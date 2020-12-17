@@ -573,8 +573,7 @@ action("base") {
 }
 
 libchrome_exported_cflags = [
-  # TODO: use unversioned include path.
-  "-I/usr/include/base-${libbase_ver}",
+  "-I/usr/include/libchrome",
   "-Wno-unused-local-typedefs",
   "-DBASE_VER=${libbase_ver}",
 ]
@@ -895,8 +894,7 @@ if (use.mojo) {
     version = "${libbase_ver}"
     libs = [ "-lmojo" ]
     cflags = [
-      # TODO: use unversioned include path.
-      "-I/usr/include/base-${libbase_ver}",
+      "-I/usr/include/libchrome",
       "-Wno-cast-qual",
       "-Wno-cast-align",
     ]
