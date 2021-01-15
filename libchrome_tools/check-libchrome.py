@@ -18,6 +18,8 @@ import sys
 BAD_KEYWORDS = {
     b'DISALLOW_COPY_AND_ASSIGN':
     'Chromium agreed to return Google C++ style. Use deleted constructor in `public:` manually. See crbug/1010217',
+    b'base::DeleteFile\(':
+    '2-param base::DeleteFile will be deprecated. Use 1-param base::DeleteFile for non-recursive and base::DeletePathRecursively for recursive deletions',
     b'base::DeleteFileRecursively':
     'Use base::DeletePathRecursively instead',
     b'LOG_(VERBOSE|INFO|WARNING|ERROR|FATAL|NUM_SEVERITIES|DFATAL)':
