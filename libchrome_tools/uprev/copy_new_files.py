@@ -18,6 +18,7 @@ import os.path
 import subprocess
 import sys
 
+import filter_config
 import filters
 import utils
 
@@ -41,8 +42,14 @@ def main():
     upstream_files = utils.get_file_list(arg.commit_hash[0])
     our_files = utils.get_file_list('HEAD')
 
+    # Initialize filters
+    libchrome_filter = filters.Filter(filter_config.WANT,
+                                      filter_config.WANT_EXCLUDE,
+                                      filter_config.KEEP,
+                                      filter_config.KEEP_EXCLUDE)
+
     # Calculate target file list
-    target_files = filters.filter_file(our_files, upstream_files)
+    target_files = libchrome_filter.filter_files(our_files, upstream_files)
 
     # Calculate operations needed
     ops = utils.gen_op(our_files, target_files)

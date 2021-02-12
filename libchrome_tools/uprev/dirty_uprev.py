@@ -17,6 +17,7 @@ import argparse
 import subprocess
 import sys
 
+import filter_config
 import filters
 import utils
 
@@ -55,11 +56,17 @@ def main():
     old_files = utils.get_file_list(arg.old_commit[0])
     new_files = utils.get_file_list(arg.new_commit[0])
 
+    # Initialize filters
+    libchrome_filter = filters.Filter(filter_config.WANT,
+                                      filter_config.WANT_EXCLUDE,
+                                      filter_config.KEEP,
+                                      filter_config.KEEP_EXCLUDE)
+
     if arg.is_browser:
-        old_files = filters.filter_file([], old_files)
-        new_files = filters.filter_file([], new_files)
-        assert filters.filter_file(old_files, []) == []
-        assert filters.filter_file(new_files, []) == []
+        old_files = libchrome_filter.filter_files([], old_files)
+        new_files = libchrome_filter.filter_files([], new_files)
+        assert libchrome_filter.filter_files(old_files, []) == []
+        assert libchrome_filter.filter_files(new_files, []) == []
 
     # Generate a tree object for new files.
     old_tree = utils.git_mktree(old_files)
