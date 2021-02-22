@@ -310,7 +310,27 @@ def main():
                         action='store_const',
                         const=True,
                         default=False)
+    parser.add_argument('--verbose',
+                        dest='verbose',
+                        action='store_const',
+                        const=True,
+                        default=False)
+    parser.add_argument('--quiet',
+                        dest='quiet',
+                        action='store_const',
+                        const=True,
+                        default=False)
+
     arg = parser.parse_args(sys.argv[1:])
+
+    if arg.quiet:
+        INFO = VERBOSE = open(os.devnull, 'w')
+    elif arg.verbose:
+        INFO = sys.stderr
+        VERBOSE = sys.stderr
+    else:
+        INFO = sys.stderr
+        VERBOSE = open(os.devnull, 'w')
 
     # Init filters
     if arg.filter_files:
@@ -318,7 +338,7 @@ def main():
             lines = [line.strip().encode('utf-8') for line in f]
         libchrome_filter = filters.Filter([filters.PathFilter(lines)], [], [],
                                           [])
-        print('Filter loaded')
+        print('Filter loaded', file=INFO)
     else:
         libchrome_filter = filters.Filter(filter_config.WANT,
                                           filter_config.WANT_EXCLUDE,
@@ -326,18 +346,20 @@ def main():
                                           filter_config.KEEP_EXCLUDE)
 
     # Look for last known commit made by the script in filtered branch.
-    print('Looking for last known commit from', arg.parent_filtered[0])
+    print('Looking for last known commit from',
+          arg.parent_filtered[0],
+          file=INFO)
     last_known, meta_last_known = get_start_commit_of_browser_tree(
         arg.parent_filtered[0])
     if last_known:
-        print('Continuing from', last_known, meta_last_known)
+        print('Continuing from', last_known, meta_last_known, file=INFO)
     else:
-        print('No known last commit')
-    print('parent on filter branch', arg.parent_filtered[0])
+        print('No known last commit', file=INFO)
+    print('parent on filter branch', arg.parent_filtered[0], file=INFO)
 
     # Get a mapping between browser repository and filtered branch for commits
     # in filtered branch.
-    print('reading commits details for commits mapping')
+    print('reading commits details for commits mapping', file=INFO)
     timing_deque = collections.deque([time.time()])
     commits_map = filtered_utils.get_commits_map(
         arg.parent_filtered[0], lambda cur_idx, tot_cnt, cur_hash:
@@ -346,6 +368,7 @@ def main():
                '%d/%d' % (cur_idx, tot_cnt),
                '%f c/s' % timing(timing_deque),
                end='\r',
+               file=VERBOSE,
                flush=True),))
     if not 'ROOT' in commits_map:
         commits_map['ROOT'] = subprocess.check_output(
@@ -354,17 +377,17 @@ def main():
                 utils.git_mktree([])
             ],
             input=filtered_utils.CROS_LIBCHROME_INITIAL_COMMIT).strip(b'\n')
-    print()
-    print('loaded commit mapping of', len(commits_map), 'commit')
+    print(file=VERBOSE)
+    print('loaded commit mapping of', len(commits_map), 'commit', file=INFO)
 
     # Process newer commits in browser repository from
     # last_known.original_commits
-    print('search for commits to filter')
+    print('search for commits to filter', file=INFO)
     timing_deque = collections.deque([time.time()])
     pending_commits = utils.git_revlist(
         meta_last_known.original_commits[0] if meta_last_known else None,
         arg.goal_browser[0])
-    print(len(pending_commits), 'commits to process')
+    print(len(pending_commits), 'commits to process', file=INFO)
     new_head = process_commits(
         libchrome_filter,
         pending_commits,
@@ -382,13 +405,15 @@ def main():
                    (tot_cnt - cur_idx) / timing(timing_deque)))),
                cur_meta.title[:50] if cur_meta else '',
                end='\r',
+               file=VERBOSE,
                flush=True),),
         # Print new commits
         lambda orig_hash, new_hash, commit_meta: print(
             b'%s is commited as %s: %s' %
-            (orig_hash, new_hash, commit_meta.title[:50])))
-    print()
-    print('New HEAD should be', new_head.decode('ascii'))
+            (orig_hash, new_hash, commit_meta.title[:50]),
+            file=INFO))
+    print(file=VERBOSE)
+    print(new_head.decode('ascii'))
 
 
 if __name__ == '__main__':
