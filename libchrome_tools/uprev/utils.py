@@ -37,6 +37,12 @@ GitBlameLine = collections.namedtuple('GitBlameLine', [
     'new_line',
 ])
 
+# Describes a commit from git rev-list
+# It has commit_hash indicating the commit hash of the commit, and parent_hashes
+# (list) indicating the commit hashes of its parents.
+GitCommitInRevList = collections.namedtuple('GitCommitInRevList',
+                                            ['commit_hash', 'parent_hashes'])
+
 GIT_DIFFTREE_RE_LINE = re.compile(
     rb'^:([^ ]*) ([^ ]*) ([^ ]*) ([^ ]*) ([^ ]*)\t(.*)$')
 
@@ -235,7 +241,7 @@ def git_revlist(from_commit, to_commit):
         if not line:
             continue
         hashes = line.split(b' ')
-        commits.append((hashes[0], hashes[1:]))
+        commits.append(GitCommitInRevList(hashes[0], hashes[1:]))
     return list(reversed(commits))
 
 
