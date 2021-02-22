@@ -37,3 +37,14 @@ class TestFilters(unittest.TestCase):
                 ])),
             self._build_file_list(['want/xxx', 'keep/xxx']),
         )
+
+    def test_path_filter(self):
+        test_filter = filters.Filter([filters.PathFilter([b'a/b/c', b'd'])], [],
+                                     [], [])
+
+        self.assertEquals(
+            test_filter.filter_files(
+                self._build_file_list([]),
+                self._build_file_list(
+                    ['a', 'b', 'c', 'a/b', 'b/c', 'a/b/c', 'd'])),
+            self._build_file_list(['a/b/c', 'd']))

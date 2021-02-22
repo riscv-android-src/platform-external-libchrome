@@ -4,6 +4,26 @@
 """Provide filters for libchrome tools."""
 
 
+class PathFilter:
+    """Provides a _sre.SRE_Pattern like class that matches a list of paths."""
+
+    def __init__(self, paths):
+        """Initializes an instance to match with the given paths.
+
+        Args:
+            paths: paths to match, must be list of bytes.
+        """
+        self.paths = paths
+
+    def match(self, what):
+        """Returns if what matches any files.
+
+        Args:
+            what: paths to look for, must be bytes.
+        """
+        return what in self.paths
+
+
 class Filter:
     """
     Provide filter functions for libchrome uprev tools

@@ -185,12 +185,6 @@ def process_commits(libchrome_filter, pending_commits, commits_map,
 
 
 def main():
-    # Init filters
-    libchrome_filter = filters.Filter(filter_config.WANT,
-                                      filter_config.WANT_EXCLUDE,
-                                      filter_config.KEEP,
-                                      filter_config.KEEP_EXCLUDE)
-
     # Init args
     parser = argparse.ArgumentParser(description='Copy file from given commits')
     parser.add_argument(
@@ -206,12 +200,33 @@ def main():
                         type=str,
                         nargs=1,
                         help='commit hash in browser master branch.')
+    parser.add_argument(
+        '--filter_files',
+        metavar='filter_files',
+        type=str,
+        help=
+        'Path a file which should contain file paths to be checked in each line. This overwrites the default file filtering rules, if given.',
+        nargs='?')
+
     parser.add_argument('--dry_run',
                         dest='dry_run',
                         action='store_const',
                         const=True,
                         default=False)
     arg = parser.parse_args(sys.argv[1:])
+
+    # Init filters
+    if arg.filter_files:
+        with open(arg.filter_files) as f:
+            lines = [line.strip().encode('utf-8') for line in f]
+        libchrome_filter = filters.Filter([filters.PathFilter(lines)], [], [],
+                                          [])
+        print('Filter loaded')
+    else:
+        libchrome_filter = filters.Filter(filter_config.WANT,
+                                          filter_config.WANT_EXCLUDE,
+                                          filter_config.KEEP,
+                                          filter_config.KEEP_EXCLUDE)
 
     # Look for last known commit made by the script in filtered branch.
     print('Looking for last known commit from', arg.parent_filtered[0])
