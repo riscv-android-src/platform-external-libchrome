@@ -1,0 +1,2113 @@
+From 5fb8d29297d2b7a4d49ac804afcb2fd393d3c3d7 Mon Sep 17 00:00:00 2001
+From: Qijiang Fan <fqj@chromium.org>
+Date: Wed, 11 Nov 2020 14:28:50 +0900
+Subject: [PATCH 1/2] include macros.h back
+
+This reverts:
+99cd5a66384f542d355388f6f32a005c6c962a52
+71ca5baa07f3cf37f862e5f73942eb304190ba50
+9bd6be6b506a1c58a38576512a5e13bb07c00f51
+96361b4184d25c01ab5ec606783cecaa3fdfa5c5
+706a29a8f3c37742ec120b9173c5fb0c42bf6d94
+
+Change-Id: I0e494c1b77efc48d4ba1265f59639c8dd02f21de
+---
+ base/at_exit.h                                |  1 +
+ base/atomic_sequence_num.h                    |  2 ++
+ base/bind_unittest.cc                         |  1 +
+ base/callback_helpers.h                       |  2 +-
+ base/callback_internal.h                      |  1 +
+ base/callback_list_unittest.nc                |  1 +
+ base/cancelable_callback.h                    |  1 +
+ base/check.h                                  |  1 +
+ base/cpu_affinity_posix_unittest.cc           |  6 ++--
+ base/critical_closure.h                       |  1 +
+ base/deferred_sequenced_task_runner.h         |  1 +
+ base/feature_list.h                           |  2 +-
+ base/feature_list_unittest.cc                 |  4 +--
+ base/file_descriptor_store.h                  |  1 +
+ base/lazy_instance_unittest.cc                | 26 +++++++--------
+ base/logging.cc                               | 11 ++-----
+ base/logging_unittest.cc                      |  1 +
+ base/metrics/dummy_histogram.cc               | 16 ++++++----
+ base/metrics/field_trial.h                    |  1 +
+ base/metrics/field_trial_unittest.cc          | 10 +++---
+ base/metrics/histogram_base_unittest.cc       |  8 ++---
+ base/metrics/histogram_flattener.h            |  1 +
+ base/metrics/histogram_samples.h              |  1 +
+ base/metrics/histogram_snapshot_manager.cc    |  6 ++--
+ base/metrics/sample_vector.h                  |  1 +
+ base/metrics/single_sample_metrics.h          |  2 +-
+ base/native_library_unittest.cc               |  1 +
+ base/no_destructor_unittest.cc                | 14 ++++----
+ base/observer_list.h                          |  1 +
+ base/observer_list_internal.h                 |  1 +
+ base/observer_list_perftest.cc                | 17 ++++++----
+ base/observer_list_threadsafe.h               |  2 +-
+ base/observer_list_threadsafe_unittest.cc     | 11 +++----
+ base/observer_list_types.h                    |  1 +
+ base/observer_list_unittest.cc                | 32 +++++++++----------
+ base/one_shot_event_unittest.cc               |  4 +--
+ base/pickle.h                                 |  5 +--
+ base/run_loop.h                               |  2 +-
+ base/run_loop_unittest.cc                     |  2 +-
+ base/scoped_clear_last_error.h                |  2 --
+ base/scoped_generic.h                         |  4 +--
+ base/scoped_native_library.h                  |  1 +
+ base/scoped_observer.h                        |  1 +
+ base/sequence_checker.h                       |  6 ++--
+ base/sequence_checker_impl.cc                 |  2 --
+ base/sequence_checker_impl.h                  |  2 ++
+ base/sequence_checker_unittest.cc             |  2 +-
+ base/sequence_token.h                         |  1 +
+ base/sequenced_task_runner_unittest.cc        | 10 +++---
+ base/supports_user_data.h                     |  1 +
+ base/sync_socket.h                            |  2 ++
+ base/sync_socket_unittest.cc                  |  1 +
+ base/syslog_logging.h                         |  5 +--
+ base/task/sequence_manager/atomic_flag_set.h  | 10 +++---
+ .../enqueue_order_generator.h                 |  1 +
+ .../lazily_deallocated_deque.h                |  2 +-
+ base/task/sequence_manager/lazy_now.h         |  1 +
+ base/task/sequence_manager/real_time_domain.h |  1 +
+ base/task/sequence_manager/sequence_manager.h |  2 +-
+ .../sequence_manager/sequence_manager_impl.h  |  2 +-
+ .../sequence_manager_perftest.cc              |  5 +--
+ base/task/sequence_manager/task_queue.h       |  1 +
+ base/task/sequence_manager/task_queue_impl.h  |  2 +-
+ .../sequence_manager/task_queue_selector.h    |  3 +-
+ .../task_queue_selector_unittest.cc           |  1 +
+ .../sequence_manager/task_time_observer.h     |  1 +
+ base/task/sequence_manager/tasks.h            |  4 +--
+ .../sequence_manager/test/mock_time_domain.h  |  4 +--
+ .../sequence_manager/thread_controller_impl.h |  1 +
+ ...thread_controller_with_message_pump_impl.h |  6 ++--
+ base/task/sequence_manager/time_domain.h      |  1 +
+ .../sequence_manager/time_domain_unittest.cc  |  1 +
+ base/task/sequence_manager/work_queue.h       |  4 +--
+ base/task/sequence_manager/work_queue_sets.h  |  2 +-
+ base/trace_event/auto_open_close_event.h      |  1 +
+ ...eap_profiler_allocation_context_tracker.cc |  3 +-
+ ...heap_profiler_allocation_context_tracker.h |  1 +
+ .../trace_event/heap_profiler_event_filter.cc |  3 ++
+ base/trace_event/heap_profiler_event_filter.h |  1 +
+ .../java_heap_dump_provider_android.cc        |  6 ++++
+ .../java_heap_dump_provider_android.h         |  1 +
+ base/trace_event/log_message.h                |  1 +
+ base/trace_event/malloc_dump_provider.h       |  1 +
+ base/trace_event/memory_allocator_dump.h      |  2 +-
+ base/trace_event/memory_dump_manager.cc       |  7 ++--
+ base/trace_event/memory_dump_manager.h        |  1 +
+ base/trace_event/memory_dump_provider.h       |  1 +
+ base/trace_event/memory_dump_scheduler.cc     |  2 +-
+ base/trace_event/memory_dump_scheduler.h      | 16 ++++------
+ base/trace_event/trace_arguments.h            |  2 +-
+ base/trace_event/trace_event.h                |  3 +-
+ .../trace_event_filter_test_utils.h           |  1 +
+ base/trace_event/trace_event_impl.h           |  1 +
+ .../trace_event/trace_event_memory_overhead.h |  1 +
+ base/trace_event/trace_event_stub.h           |  2 +-
+ base/trace_event/trace_log.cc                 |  1 +
+ base/trace_event/traced_value.h               |  1 +
+ base/updateable_sequenced_task_runner.h       |  5 ++-
+ base/values.h                                 |  1 +
+ base/vlog.h                                   |  1 +
+ 100 files changed, 206 insertions(+), 157 deletions(-)
+
+diff --git a/base/at_exit.h b/base/at_exit.h
+index 2a1104697a65..71e49f71f9a8 100644
+--- a/base/at_exit.h
++++ b/base/at_exit.h
+@@ -8,6 +8,7 @@
+ #include "base/base_export.h"
+ #include "base/callback.h"
+ #include "base/containers/stack.h"
++#include "base/macros.h"
+ #include "base/synchronization/lock.h"
+ #include "base/thread_annotations.h"
+ 
+diff --git a/base/atomic_sequence_num.h b/base/atomic_sequence_num.h
+index d0ab9eb44e1b..d8868f74f164 100644
+--- a/base/atomic_sequence_num.h
++++ b/base/atomic_sequence_num.h
+@@ -7,6 +7,8 @@
+ 
+ #include <atomic>
+ 
++#include "base/macros.h"
++
+ namespace base {
+ 
+ // AtomicSequenceNumber is a thread safe increasing sequence number generator.
+diff --git a/base/bind_unittest.cc b/base/bind_unittest.cc
+index f67b9ad7bc62..53cd9421e5aa 100644
+--- a/base/bind_unittest.cc
++++ b/base/bind_unittest.cc
+@@ -10,6 +10,7 @@
+ #include <vector>
+ 
+ #include "base/callback.h"
++#include "base/macros.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/memory/weak_ptr.h"
+diff --git a/base/callback_helpers.h b/base/callback_helpers.h
+index 2ed101122b6a..39bf0bec5e70 100644
+--- a/base/callback_helpers.h
++++ b/base/callback_helpers.h
+@@ -10,7 +10,6 @@
+ #ifndef BASE_CALLBACK_HELPERS_H_
+ #define BASE_CALLBACK_HELPERS_H_
+ 
+-#include <memory>
+ #include <type_traits>
+ #include <utility>
+ 
+@@ -18,6 +17,7 @@
+ #include "base/bind.h"
+ #include "base/callback.h"
+ #include "base/compiler_specific.h"
++#include "base/macros.h"
+ #include "base/memory/ptr_util.h"
+ 
+ namespace base {
+diff --git a/base/callback_internal.h b/base/callback_internal.h
+index 2f34ac72ffc7..91db89bb74be 100644
+--- a/base/callback_internal.h
++++ b/base/callback_internal.h
+@@ -10,6 +10,7 @@
+ 
+ #include "base/base_export.h"
+ #include "base/callback_forward.h"
++#include "base/macros.h"
+ #include "base/memory/ref_counted.h"
+ 
+ namespace base {
+diff --git a/base/callback_list_unittest.nc b/base/callback_list_unittest.nc
+index 7a0e1c1e1368..f68ec4476c65 100644
+--- a/base/callback_list_unittest.nc
++++ b/base/callback_list_unittest.nc
+@@ -12,6 +12,7 @@
+ 
+ #include "base/bind.h"
+ #include "base/bind_helpers.h"
++#include "base/macros.h"
+ 
+ namespace base {
+ 
+diff --git a/base/cancelable_callback.h b/base/cancelable_callback.h
+index c19e9a363bd2..af59eb628183 100644
+--- a/base/cancelable_callback.h
++++ b/base/cancelable_callback.h
+@@ -53,6 +53,7 @@
+ #include "base/callback_internal.h"
+ #include "base/check.h"
+ #include "base/compiler_specific.h"
++#include "base/macros.h"
+ #include "base/memory/weak_ptr.h"
+ 
+ namespace base {
+diff --git a/base/check.h b/base/check.h
+index c5a37d1279b0..3ff3095988a2 100644
+--- a/base/check.h
++++ b/base/check.h
+@@ -11,6 +11,7 @@
+ #include "base/compiler_specific.h"
+ #include "base/dcheck_is_on.h"
+ #include "base/immediate_crash.h"
++#include "base/macros.h"
+ 
+ // This header defines the CHECK, DCHECK, and DPCHECK macros.
+ //
+diff --git a/base/cpu_affinity_posix_unittest.cc b/base/cpu_affinity_posix_unittest.cc
+index 86ffa04d7f25..bf70d1b9259f 100644
+--- a/base/cpu_affinity_posix_unittest.cc
++++ b/base/cpu_affinity_posix_unittest.cc
+@@ -6,8 +6,6 @@
+ 
+ #include <sched.h>
+ 
+-#include <string>
+-
+ #include "base/synchronization/waitable_event.h"
+ #include "base/system/sys_info.h"
+ #include "base/threading/platform_thread.h"
+@@ -26,8 +24,6 @@ class TestThread : public PlatformThread::Delegate {
+                            WaitableEvent::InitialState::NOT_SIGNALED),
+         terminate_thread_(WaitableEvent::ResetPolicy::MANUAL,
+                           WaitableEvent::InitialState::NOT_SIGNALED) {}
+-  TestThread(const TestThread&) = delete;
+-  TestThread& operator=(const TestThread&) = delete;
+   ~TestThread() override {
+     EXPECT_TRUE(terminate_thread_.IsSignaled())
+         << "Need to mark thread for termination and join the underlying thread "
+@@ -70,6 +66,8 @@ class TestThread : public PlatformThread::Delegate {
+   mutable WaitableEvent termination_ready_;
+   WaitableEvent terminate_thread_;
+   bool done_ = false;
++
++  DISALLOW_COPY_AND_ASSIGN(TestThread);
+ };
+ 
+ }  // namespace
+diff --git a/base/critical_closure.h b/base/critical_closure.h
+index d47442ddb4b3..14c66df72046 100644
+--- a/base/critical_closure.h
++++ b/base/critical_closure.h
+@@ -8,6 +8,7 @@
+ #include <utility>
+ 
+ #include "base/callback.h"
++#include "base/macros.h"
+ #include "base/strings/string_piece.h"
+ #include "build/build_config.h"
+ 
+diff --git a/base/deferred_sequenced_task_runner.h b/base/deferred_sequenced_task_runner.h
+index 864b8d5355a3..5646db9c5e65 100644
+--- a/base/deferred_sequenced_task_runner.h
++++ b/base/deferred_sequenced_task_runner.h
+@@ -10,6 +10,7 @@
+ #include "base/base_export.h"
+ #include "base/callback.h"
+ #include "base/compiler_specific.h"
++#include "base/macros.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/sequenced_task_runner.h"
+ #include "base/synchronization/lock.h"
+diff --git a/base/feature_list.h b/base/feature_list.h
+index c3f1c9cbc27b..bf30421cdc8b 100644
+--- a/base/feature_list.h
++++ b/base/feature_list.h
+@@ -9,11 +9,11 @@
+ #include <map>
+ #include <memory>
+ #include <string>
+-#include <utility>
+ #include <vector>
+ 
+ #include "base/base_export.h"
+ #include "base/gtest_prod_util.h"
++#include "base/macros.h"
+ #include "base/metrics/field_trial_params.h"
+ #include "base/metrics/persistent_memory_allocator.h"
+ #include "base/strings/string_piece.h"
+diff --git a/base/feature_list_unittest.cc b/base/feature_list_unittest.cc
+index 1cef7f4eb0d0..8eb1c8d9b06b 100644
+--- a/base/feature_list_unittest.cc
++++ b/base/feature_list_unittest.cc
+@@ -51,12 +51,12 @@ class FeatureListTest : public testing::Test {
+     // Provide an empty FeatureList to each test by default.
+     scoped_feature_list_.InitWithFeatureList(std::make_unique<FeatureList>());
+   }
+-  FeatureListTest(const FeatureListTest&) = delete;
+-  FeatureListTest& operator=(const FeatureListTest&) = delete;
+   ~FeatureListTest() override = default;
+ 
+  private:
+   test::ScopedFeatureList scoped_feature_list_;
++
++  DISALLOW_COPY_AND_ASSIGN(FeatureListTest);
+ };
+ 
+ TEST_F(FeatureListTest, DefaultStates) {
+diff --git a/base/file_descriptor_store.h b/base/file_descriptor_store.h
+index f22e1246413e..36fa0bf9f483 100644
+--- a/base/file_descriptor_store.h
++++ b/base/file_descriptor_store.h
+@@ -10,6 +10,7 @@
+ 
+ #include "base/files/memory_mapped_file.h"
+ #include "base/files/scoped_file.h"
++#include "base/macros.h"
+ 
+ namespace base {
+ 
+diff --git a/base/lazy_instance_unittest.cc b/base/lazy_instance_unittest.cc
+index bc990b02dfea..ad1f0ebf44c1 100644
+--- a/base/lazy_instance_unittest.cc
++++ b/base/lazy_instance_unittest.cc
+@@ -32,12 +32,12 @@ class ConstructAndDestructLogger {
+   ConstructAndDestructLogger() {
+     constructed_seq_.GetNext();
+   }
+-  ConstructAndDestructLogger(const ConstructAndDestructLogger&) = delete;
+-  ConstructAndDestructLogger& operator=(const ConstructAndDestructLogger&) =
+-      delete;
+   ~ConstructAndDestructLogger() {
+     destructed_seq_.GetNext();
+   }
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(ConstructAndDestructLogger);
+ };
+ 
+ class SlowConstructor {
+@@ -48,13 +48,13 @@ class SlowConstructor {
+     ++constructed;
+     some_int_ = 12;
+   }
+-  SlowConstructor(const SlowConstructor&) = delete;
+-  SlowConstructor& operator=(const SlowConstructor&) = delete;
+   int some_int() const { return some_int_; }
+ 
+   static int constructed;
+  private:
+   int some_int_;
++
++  DISALLOW_COPY_AND_ASSIGN(SlowConstructor);
+ };
+ 
+ // static
+@@ -65,8 +65,6 @@ class SlowDelegate : public base::DelegateSimpleThread::Delegate {
+   explicit SlowDelegate(
+       base::LazyInstance<SlowConstructor>::DestructorAtExit* lazy)
+       : lazy_(lazy) {}
+-  SlowDelegate(const SlowDelegate&) = delete;
+-  SlowDelegate& operator=(const SlowDelegate&) = delete;
+ 
+   void Run() override {
+     EXPECT_EQ(12, lazy_->Get().some_int());
+@@ -75,6 +73,8 @@ class SlowDelegate : public base::DelegateSimpleThread::Delegate {
+ 
+  private:
+   base::LazyInstance<SlowConstructor>::DestructorAtExit* lazy_;
++
++  DISALLOW_COPY_AND_ASSIGN(SlowDelegate);
+ };
+ 
+ }  // namespace
+@@ -212,8 +212,7 @@ class BlockingConstructor {
+       base::PlatformThread::YieldCurrentThread();
+     done_construction_ = true;
+   }
+-  BlockingConstructor(const BlockingConstructor&) = delete;
+-  BlockingConstructor& operator=(const BlockingConstructor&) = delete;
++
+   ~BlockingConstructor() {
+     // Restore static state for the next test.
+     base::subtle::NoBarrier_Store(&constructor_called_, 0);
+@@ -230,7 +229,7 @@ class BlockingConstructor {
+     base::subtle::NoBarrier_Store(&complete_construction_, 1);
+   }
+ 
+-  bool done_construction() const { return done_construction_; }
++  bool done_construction() { return done_construction_; }
+ 
+  private:
+   // Use Atomic32 instead of AtomicFlag for them to be trivially initialized.
+@@ -238,6 +237,8 @@ class BlockingConstructor {
+   static base::subtle::Atomic32 complete_construction_;
+ 
+   bool done_construction_ = false;
++
++  DISALLOW_COPY_AND_ASSIGN(BlockingConstructor);
+ };
+ 
+ // A SimpleThread running at |thread_priority| which invokes |before_get|
+@@ -251,9 +252,6 @@ class BlockingConstructorThread : public base::SimpleThread {
+       : SimpleThread("BlockingConstructorThread", Options(thread_priority)),
+         lazy_(lazy),
+         before_get_(std::move(before_get)) {}
+-  BlockingConstructorThread(const BlockingConstructorThread&) = delete;
+-  BlockingConstructorThread& operator=(const BlockingConstructorThread&) =
+-      delete;
+ 
+   void Run() override {
+     if (before_get_)
+@@ -264,6 +262,8 @@ class BlockingConstructorThread : public base::SimpleThread {
+  private:
+   base::LazyInstance<BlockingConstructor>::DestructorAtExit* lazy_;
+   base::OnceClosure before_get_;
++
++  DISALLOW_COPY_AND_ASSIGN(BlockingConstructorThread);
+ };
+ 
+ // static
+diff --git a/base/logging.cc b/base/logging.cc
+index 2033ea75e991..81b80d89b1e3 100644
+--- a/base/logging.cc
++++ b/base/logging.cc
+@@ -18,8 +18,6 @@
+ #include <limits.h>
+ #include <stdint.h>
+ 
+-#include <vector>
+-
+ #include "base/pending_task.h"
+ #include "base/stl_util.h"
+ #include "base/task/common/task_annotator.h"
+@@ -648,28 +646,26 @@ LogMessage::~LogMessage() {
+        public:
+         explicit ASLClient(const std::string& facility)
+             : client_(asl_open(nullptr, facility.c_str(), ASL_OPT_NO_DELAY)) {}
+-        ASLClient(const ASLClient&) = delete;
+-        ASLClient& operator=(const ASLClient&) = delete;
+         ~ASLClient() { asl_close(client_); }
+ 
+         aslclient get() const { return client_; }
+ 
+        private:
+         aslclient client_;
++        DISALLOW_COPY_AND_ASSIGN(ASLClient);
+       } asl_client(main_bundle_id.empty() ? main_bundle_id
+                                           : "com.apple.console");
+ 
+       const class ASLMessage {
+        public:
+         ASLMessage() : message_(asl_new(ASL_TYPE_MSG)) {}
+-        ASLMessage(const ASLMessage&) = delete;
+-        ASLMessage& operator=(const ASLMessage&) = delete;
+         ~ASLMessage() { asl_free(message_); }
+ 
+         aslmsg get() const { return message_; }
+ 
+        private:
+         aslmsg message_;
++        DISALLOW_COPY_AND_ASSIGN(ASLMessage);
+       } asl_message;
+ 
+       // By default, messages are only readable by the admin group. Explicitly
+@@ -712,8 +708,6 @@ LogMessage::~LogMessage() {
+         explicit OSLog(const char* subsystem)
+             : os_log_(subsystem ? os_log_create(subsystem, "chromium_logging")
+                                 : OS_LOG_DEFAULT) {}
+-        OSLog(const OSLog&) = delete;
+-        OSLog& operator=(const OSLog&) = delete;
+         ~OSLog() {
+           if (os_log_ != OS_LOG_DEFAULT) {
+             os_release(os_log_);
+@@ -723,6 +717,7 @@ LogMessage::~LogMessage() {
+ 
+        private:
+         os_log_t os_log_;
++        DISALLOW_COPY_AND_ASSIGN(OSLog);
+       } log(main_bundle_id.empty() ? nullptr : main_bundle_id.c_str());
+       const os_log_type_t os_log_type = [](LogSeverity severity) {
+         switch (severity) {
+diff --git a/base/logging_unittest.cc b/base/logging_unittest.cc
+index 304c5e2e98be..5309174f3626 100644
+--- a/base/logging_unittest.cc
++++ b/base/logging_unittest.cc
+@@ -11,6 +11,7 @@
+ #include "base/files/file_util.h"
+ #include "base/files/scoped_temp_dir.h"
+ #include "base/logging.h"
++#include "base/macros.h"
+ #include "base/no_destructor.h"
+ #include "base/run_loop.h"
+ #include "base/sanitizer_buildflags.h"
+diff --git a/base/metrics/dummy_histogram.cc b/base/metrics/dummy_histogram.cc
+index a2380351585b..45ae7f2fb118 100644
+--- a/base/metrics/dummy_histogram.cc
++++ b/base/metrics/dummy_histogram.cc
+@@ -18,10 +18,8 @@ namespace {
+ // Helper classes for DummyHistogram.
+ class DummySampleCountIterator : public SampleCountIterator {
+  public:
+-  DummySampleCountIterator() = default;
+-  DummySampleCountIterator(const DummySampleCountIterator&) = delete;
+-  DummySampleCountIterator& operator=(const DummySampleCountIterator&) = delete;
+-  ~DummySampleCountIterator() override = default;
++  DummySampleCountIterator() {}
++  ~DummySampleCountIterator() override {}
+ 
+   // SampleCountIterator:
+   bool Done() const override { return true; }
+@@ -31,13 +29,14 @@ class DummySampleCountIterator : public SampleCountIterator {
+            HistogramBase::Count* count) const override {
+     NOTREACHED();
+   }
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(DummySampleCountIterator);
+ };
+ 
+ class DummyHistogramSamples : public HistogramSamples {
+  public:
+-  DummyHistogramSamples() : HistogramSamples(0, new LocalMetadata()) {}
+-  DummyHistogramSamples(const DummyHistogramSamples&) = delete;
+-  DummyHistogramSamples& operator=(const DummyHistogramSamples&) = delete;
++  explicit DummyHistogramSamples() : HistogramSamples(0, new LocalMetadata()) {}
+   ~DummyHistogramSamples() override {
+     delete static_cast<LocalMetadata*>(meta());
+   }
+@@ -57,6 +56,9 @@ class DummyHistogramSamples : public HistogramSamples {
+   bool AddSubtractImpl(SampleCountIterator* iter, Operator op) override {
+     return true;
+   }
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(DummyHistogramSamples);
+ };
+ 
+ }  // namespace
+diff --git a/base/metrics/field_trial.h b/base/metrics/field_trial.h
+index 67c57ed17990..3ac1029db56a 100644
+--- a/base/metrics/field_trial.h
++++ b/base/metrics/field_trial.h
+@@ -67,6 +67,7 @@
+ #include "base/command_line.h"
+ #include "base/feature_list.h"
+ #include "base/gtest_prod_util.h"
++#include "base/macros.h"
+ #include "base/memory/read_only_shared_memory_region.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/memory/shared_memory_mapping.h"
+diff --git a/base/metrics/field_trial_unittest.cc b/base/metrics/field_trial_unittest.cc
+index 6fbddd07985f..62c793482d21 100644
+--- a/base/metrics/field_trial_unittest.cc
++++ b/base/metrics/field_trial_unittest.cc
+@@ -63,14 +63,12 @@ class TestFieldTrialObserver : public FieldTrialList::Observer {
+     SYNCHRONOUS,
+   };
+ 
+-  explicit TestFieldTrialObserver(Type type) : type_(type) {
++  TestFieldTrialObserver(Type type) : type_(type) {
+     if (type == SYNCHRONOUS)
+       FieldTrialList::SetSynchronousObserver(this);
+     else
+       FieldTrialList::AddObserver(this);
+   }
+-  TestFieldTrialObserver(const TestFieldTrialObserver&) = delete;
+-  TestFieldTrialObserver& operator=(const TestFieldTrialObserver&) = delete;
+ 
+   ~TestFieldTrialObserver() override {
+     if (type_ == SYNCHRONOUS)
+@@ -92,6 +90,8 @@ class TestFieldTrialObserver : public FieldTrialList::Observer {
+   const Type type_;
+   std::string trial_name_;
+   std::string group_name_;
++
++  DISALLOW_COPY_AND_ASSIGN(TestFieldTrialObserver);
+ };
+ 
+ std::string MockEscapeQueryParamValue(const std::string& input) {
+@@ -103,8 +103,6 @@ std::string MockEscapeQueryParamValue(const std::string& input) {
+ class FieldTrialTest : public ::testing::Test {
+  public:
+   FieldTrialTest() : trial_list_(nullptr) {}
+-  FieldTrialTest(const FieldTrialTest&) = delete;
+-  FieldTrialTest& operator=(const FieldTrialTest&) = delete;
+ 
+  private:
+   test::TaskEnvironment task_environment_;
+@@ -112,6 +110,8 @@ class FieldTrialTest : public ::testing::Test {
+   // tests it's cleaner to start from scratch.
+   test::ScopedFieldTrialListResetter trial_list_resetter_;
+   FieldTrialList trial_list_;
++
++  DISALLOW_COPY_AND_ASSIGN(FieldTrialTest);
+ };
+ 
+ // Test registration, and also check that destructors are called for trials.
+diff --git a/base/metrics/histogram_base_unittest.cc b/base/metrics/histogram_base_unittest.cc
+index 5eded4484f33..0314ef4d61eb 100644
+--- a/base/metrics/histogram_base_unittest.cc
++++ b/base/metrics/histogram_base_unittest.cc
+@@ -2,7 +2,6 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-#include <limits>
+ #include <vector>
+ 
+ #include "base/metrics/histogram.h"
+@@ -16,18 +15,15 @@
+ namespace base {
+ 
+ class HistogramBaseTest : public testing::Test {
+- public:
++ protected:
+   HistogramBaseTest() {
+     // Each test will have a clean state (no Histogram / BucketRanges
+     // registered).
+     ResetStatisticsRecorder();
+   }
+ 
+-  HistogramBaseTest(const HistogramBaseTest&) = delete;
+-  HistogramBaseTest& operator=(const HistogramBaseTest&) = delete;
+   ~HistogramBaseTest() override = default;
+ 
+- protected:
+   void ResetStatisticsRecorder() {
+     // It is necessary to fully destruct any existing StatisticsRecorder
+     // before creating a new one.
+@@ -37,6 +33,8 @@ class HistogramBaseTest : public testing::Test {
+ 
+  private:
+   std::unique_ptr<StatisticsRecorder> statistics_recorder_;
++
++  DISALLOW_COPY_AND_ASSIGN(HistogramBaseTest);
+ };
+ 
+ TEST_F(HistogramBaseTest, DeserializeHistogram) {
+diff --git a/base/metrics/histogram_flattener.h b/base/metrics/histogram_flattener.h
+index ccfb2d8a17d4..cb1300e30aa0 100644
+--- a/base/metrics/histogram_flattener.h
++++ b/base/metrics/histogram_flattener.h
+@@ -8,6 +8,7 @@
+ #include <map>
+ #include <string>
+ 
++#include "base/macros.h"
+ #include "base/metrics/histogram.h"
+ 
+ namespace base {
+diff --git a/base/metrics/histogram_samples.h b/base/metrics/histogram_samples.h
+index d78b449041f1..f8603a9b2006 100644
+--- a/base/metrics/histogram_samples.h
++++ b/base/metrics/histogram_samples.h
+@@ -12,6 +12,7 @@
+ #include <memory>
+ 
+ #include "base/atomicops.h"
++#include "base/macros.h"
+ #include "base/metrics/histogram_base.h"
+ 
+ namespace base {
+diff --git a/base/metrics/histogram_snapshot_manager.cc b/base/metrics/histogram_snapshot_manager.cc
+index 2d45d7397ee2..fa04b54235d1 100644
+--- a/base/metrics/histogram_snapshot_manager.cc
++++ b/base/metrics/histogram_snapshot_manager.cc
+@@ -21,16 +21,16 @@ namespace {
+ // an error if the flag is already set.
+ class MakeActive {
+  public:
+-  explicit MakeActive(std::atomic<bool>* is_active) : is_active_(is_active) {
++  MakeActive(std::atomic<bool>* is_active) : is_active_(is_active) {
+     bool was_active = is_active_->exchange(true, std::memory_order_relaxed);
+     CHECK(!was_active);
+   }
+-  MakeActive(const MakeActive&) = delete;
+-  MakeActive& operator=(const MakeActive&) = delete;
+   ~MakeActive() { is_active_->store(false, std::memory_order_relaxed); }
+ 
+  private:
+   std::atomic<bool>* is_active_;
++
++  DISALLOW_COPY_AND_ASSIGN(MakeActive);
+ };
+ 
+ }  // namespace
+diff --git a/base/metrics/sample_vector.h b/base/metrics/sample_vector.h
+index 0765e973037e..6e49d2d3423b 100644
+--- a/base/metrics/sample_vector.h
++++ b/base/metrics/sample_vector.h
+@@ -17,6 +17,7 @@
+ #include "base/atomicops.h"
+ #include "base/compiler_specific.h"
+ #include "base/gtest_prod_util.h"
++#include "base/macros.h"
+ #include "base/metrics/bucket_ranges.h"
+ #include "base/metrics/histogram_base.h"
+ #include "base/metrics/histogram_samples.h"
+diff --git a/base/metrics/single_sample_metrics.h b/base/metrics/single_sample_metrics.h
+index c8fc1ee1791e..e74a49ff51db 100644
+--- a/base/metrics/single_sample_metrics.h
++++ b/base/metrics/single_sample_metrics.h
+@@ -5,10 +5,10 @@
+ #ifndef BASE_METRICS_SINGLE_SAMPLE_METRICS_H_
+ #define BASE_METRICS_SINGLE_SAMPLE_METRICS_H_
+ 
+-#include <memory>
+ #include <string>
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/metrics/histogram_base.h"
+ 
+ namespace base {
+diff --git a/base/native_library_unittest.cc b/base/native_library_unittest.cc
+index 3933202d876e..fb4f1db7168f 100644
+--- a/base/native_library_unittest.cc
++++ b/base/native_library_unittest.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "base/files/file_path.h"
++#include "base/macros.h"
+ #include "base/native_library.h"
+ #include "base/path_service.h"
+ #include "base/test/native_library_test_utils.h"
+diff --git a/base/no_destructor_unittest.cc b/base/no_destructor_unittest.cc
+index 5c83366e84d4..8c57c054274a 100644
+--- a/base/no_destructor_unittest.cc
++++ b/base/no_destructor_unittest.cc
+@@ -4,10 +4,8 @@
+ 
+ #include "base/no_destructor.h"
+ 
+-#include <memory>
+ #include <string>
+ #include <utility>
+-#include <vector>
+ 
+ #include "base/atomicops.h"
+ #include "base/barrier_closure.h"
+@@ -113,8 +111,7 @@ class BlockingConstructor {
+       PlatformThread::YieldCurrentThread();
+     done_construction_ = true;
+   }
+-  BlockingConstructor(const BlockingConstructor&) = delete;
+-  BlockingConstructor& operator=(const BlockingConstructor&) = delete;
++
+   ~BlockingConstructor() = delete;
+ 
+   // Returns true if BlockingConstructor() was entered.
+@@ -127,7 +124,7 @@ class BlockingConstructor {
+     subtle::NoBarrier_Store(&complete_construction_, 1);
+   }
+ 
+-  bool done_construction() const { return done_construction_; }
++  bool done_construction() { return done_construction_; }
+ 
+  private:
+   // Use Atomic32 instead of AtomicFlag for them to be trivially initialized.
+@@ -135,6 +132,8 @@ class BlockingConstructor {
+   static subtle::Atomic32 complete_construction_;
+ 
+   bool done_construction_ = false;
++
++  DISALLOW_COPY_AND_ASSIGN(BlockingConstructor);
+ };
+ 
+ // static
+@@ -151,9 +150,6 @@ class BlockingConstructorThread : public SimpleThread {
+                             OnceClosure before_get)
+       : SimpleThread("BlockingConstructorThread", Options(thread_priority)),
+         before_get_(std::move(before_get)) {}
+-  BlockingConstructorThread(const BlockingConstructorThread&) = delete;
+-  BlockingConstructorThread& operator=(const BlockingConstructorThread&) =
+-      delete;
+ 
+   void Run() override {
+     if (before_get_)
+@@ -165,6 +161,8 @@ class BlockingConstructorThread : public SimpleThread {
+ 
+  private:
+   OnceClosure before_get_;
++
++  DISALLOW_COPY_AND_ASSIGN(BlockingConstructorThread);
+ };
+ 
+ }  // namespace
+diff --git a/base/observer_list.h b/base/observer_list.h
+index 834ee64eee1a..0a4930af32de 100644
+--- a/base/observer_list.h
++++ b/base/observer_list.h
+@@ -15,6 +15,7 @@
+ 
+ #include "base/check_op.h"
+ #include "base/gtest_prod_util.h"
++#include "base/macros.h"
+ #include "base/notreached.h"
+ #include "base/observer_list_internal.h"
+ #include "base/ranges/algorithm.h"
+diff --git a/base/observer_list_internal.h b/base/observer_list_internal.h
+index 560bde631d5c..e2998740e805 100644
+--- a/base/observer_list_internal.h
++++ b/base/observer_list_internal.h
+@@ -8,6 +8,7 @@
+ #include "base/base_export.h"
+ #include "base/check_op.h"
+ #include "base/containers/linked_list.h"
++#include "base/macros.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/observer_list_types.h"
+ 
+diff --git a/base/observer_list_perftest.cc b/base/observer_list_perftest.cc
+index 6bc5c88a7cb5..ae70a84e5c32 100644
+--- a/base/observer_list_perftest.cc
++++ b/base/observer_list_perftest.cc
+@@ -7,6 +7,7 @@
+ #include <memory>
+ 
+ #include "base/check_op.h"
++#include "base/observer_list.h"
+ #include "base/strings/stringprintf.h"
+ #include "base/time/time.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+@@ -33,11 +34,12 @@ perf_test::PerfResultReporter SetUpReporter(const std::string& story_name) {
+ 
+ class ObserverInterface {
+  public:
+-  ObserverInterface() = default;
+-  ObserverInterface(const ObserverInterface&) = delete;
+-  ObserverInterface& operator=(const ObserverInterface&) = delete;
+-  virtual ~ObserverInterface() = default;
++  ObserverInterface() {}
++  virtual ~ObserverInterface() {}
+   virtual void Observe() const { ++g_observer_list_perf_test_counter; }
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(ObserverInterface);
+ };
+ 
+ class UnsafeObserver : public ObserverInterface {};
+@@ -62,9 +64,10 @@ class ObserverListPerfTest : public ::testing::Test {
+  public:
+   using ObserverListType = typename Pick<ObserverType>::ObserverListType;
+ 
+-  ObserverListPerfTest() = default;
+-  ObserverListPerfTest(const ObserverListPerfTest&) = delete;
+-  ObserverListPerfTest& operator=(const ObserverListPerfTest&) = delete;
++  ObserverListPerfTest() {}
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(ObserverListPerfTest);
+ };
+ 
+ typedef ::testing::Types<UnsafeObserver, TestCheckedObserver> ObserverTypes;
+diff --git a/base/observer_list_threadsafe.h b/base/observer_list_threadsafe.h
+index 0148efe63c95..5ea0b0a9e635 100644
+--- a/base/observer_list_threadsafe.h
++++ b/base/observer_list_threadsafe.h
+@@ -7,13 +7,13 @@
+ 
+ #include <unordered_map>
+ #include <utility>
+-#include <vector>
+ 
+ #include "base/base_export.h"
+ #include "base/bind.h"
+ #include "base/check_op.h"
+ #include "base/lazy_instance.h"
+ #include "base/location.h"
++#include "base/macros.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/observer_list.h"
+ #include "base/sequenced_task_runner.h"
+diff --git a/base/observer_list_threadsafe_unittest.cc b/base/observer_list_threadsafe_unittest.cc
+index 446c5169b6f0..efcb42396f1f 100644
+--- a/base/observer_list_threadsafe_unittest.cc
++++ b/base/observer_list_threadsafe_unittest.cc
+@@ -304,9 +304,6 @@ class SequenceVerificationObserver : public Foo {
+   explicit SequenceVerificationObserver(
+       scoped_refptr<SequencedTaskRunner> task_runner)
+       : task_runner_(std::move(task_runner)) {}
+-  SequenceVerificationObserver(const SequenceVerificationObserver&) = delete;
+-  SequenceVerificationObserver& operator=(const SequenceVerificationObserver&) =
+-      delete;
+   ~SequenceVerificationObserver() override = default;
+ 
+   void Observe(int x) override {
+@@ -318,6 +315,8 @@ class SequenceVerificationObserver : public Foo {
+  private:
+   const scoped_refptr<SequencedTaskRunner> task_runner_;
+   bool called_on_valid_sequence_ = false;
++
++  DISALLOW_COPY_AND_ASSIGN(SequenceVerificationObserver);
+ };
+ 
+ }  // namespace
+@@ -379,10 +378,6 @@ class RemoveWhileNotificationIsRunningObserver : public Foo {
+                               WaitableEvent::InitialState::NOT_SIGNALED),
+         barrier_(WaitableEvent::ResetPolicy::AUTOMATIC,
+                  WaitableEvent::InitialState::NOT_SIGNALED) {}
+-  RemoveWhileNotificationIsRunningObserver(
+-      const RemoveWhileNotificationIsRunningObserver&) = delete;
+-  RemoveWhileNotificationIsRunningObserver& operator=(
+-      const RemoveWhileNotificationIsRunningObserver&) = delete;
+   ~RemoveWhileNotificationIsRunningObserver() override = default;
+ 
+   void Observe(int x) override {
+@@ -397,6 +392,8 @@ class RemoveWhileNotificationIsRunningObserver : public Foo {
+  private:
+   WaitableEvent notification_running_;
+   WaitableEvent barrier_;
++
++  DISALLOW_COPY_AND_ASSIGN(RemoveWhileNotificationIsRunningObserver);
+ };
+ 
+ }  // namespace
+diff --git a/base/observer_list_types.h b/base/observer_list_types.h
+index 4bb92b6dadb8..a133a3c28d08 100644
+--- a/base/observer_list_types.h
++++ b/base/observer_list_types.h
+@@ -6,6 +6,7 @@
+ #define BASE_OBSERVER_LIST_TYPES_H_
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/memory/weak_ptr.h"
+ 
+ namespace base {
+diff --git a/base/observer_list_unittest.cc b/base/observer_list_unittest.cc
+index 8fe0950e5105..f37d6938e0b4 100644
+--- a/base/observer_list_unittest.cc
++++ b/base/observer_list_unittest.cc
+@@ -4,8 +4,6 @@
+ 
+ #include "base/observer_list.h"
+ 
+-#include <memory>
+-
+ #include "base/strings/string_piece.h"
+ #include "base/test/gtest_util.h"
+ #include "base/threading/simple_thread.h"
+@@ -145,9 +143,7 @@ class ObserverListCreator : public DelegateSimpleThread::Delegate {
+ 
+ class ObserverListTestBase {
+  public:
+-  ObserverListTestBase() = default;
+-  ObserverListTestBase(const ObserverListTestBase&) = delete;
+-  ObserverListTestBase& operator=(const ObserverListTestBase&) = delete;
++  ObserverListTestBase() {}
+ 
+   template <class T>
+   const decltype(T::list_.get()) list(const T& iter) {
+@@ -167,6 +163,9 @@ class ObserverListTestBase {
+     EXPECT_DCHECK_DEATH(return iter->GetCurrent());
+     return nullptr;
+   }
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(ObserverListTestBase);
+ };
+ 
+ // Templatized test fixture that can pick between CheckedBase and UncheckedBase.
+@@ -180,9 +179,10 @@ class ObserverListTest : public ObserverListTestBase, public ::testing::Test {
+   using iterator = typename ObserverList<ObserverType>::iterator;
+   using const_iterator = typename ObserverList<ObserverType>::const_iterator;
+ 
+-  ObserverListTest() = default;
+-  ObserverListTest(const ObserverListTest&) = delete;
+-  ObserverListTest& operator=(const ObserverListTest&) = delete;
++  ObserverListTest() {}
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(ObserverListTest);
+ };
+ 
+ using ObserverTypes = ::testing::Types<CheckedBase, UncheckedBase>;
+@@ -200,10 +200,10 @@ TYPED_TEST_SUITE(ObserverListTest, ObserverTypes);
+   using Disrupter = DisrupterT<ObserverListFoo>;                            \
+   using const_iterator = typename TestFixture::const_iterator;              \
+   using iterator = typename TestFixture::iterator;                          \
+-  (void)reinterpret_cast<Disrupter*>(0);                                    \
+-  (void)reinterpret_cast<Adder*>(0);                                        \
+-  (void)reinterpret_cast<const_iterator*>(0);                               \
+-  (void)reinterpret_cast<iterator*>(0)
++  (void)(Disrupter*)(0);                                                    \
++  (void)(Adder*)(0);                                                        \
++  (void)(const_iterator*)(0);                                               \
++  (void)(iterator*)(0)
+ 
+ TYPED_TEST(ObserverListTest, BasicTest) {
+   DECLARE_TYPES;
+@@ -950,26 +950,26 @@ TYPED_TEST(ObserverListTest, ReentrantObserverList) {
+ class TestCheckedObserver : public CheckedObserver {
+  public:
+   explicit TestCheckedObserver(int* count) : count_(count) {}
+-  TestCheckedObserver(const TestCheckedObserver&) = delete;
+-  TestCheckedObserver& operator=(const TestCheckedObserver&) = delete;
+ 
+   void Observe() { ++(*count_); }
+ 
+  private:
+   int* count_;
++
++  DISALLOW_COPY_AND_ASSIGN(TestCheckedObserver);
+ };
+ 
+ // A second, identical observer, used to test multiple inheritance.
+ class TestCheckedObserver2 : public CheckedObserver {
+  public:
+   explicit TestCheckedObserver2(int* count) : count_(count) {}
+-  TestCheckedObserver2(const TestCheckedObserver2&) = delete;
+-  TestCheckedObserver2& operator=(const TestCheckedObserver2&) = delete;
+ 
+   void Observe() { ++(*count_); }
+ 
+  private:
+   int* count_;
++
++  DISALLOW_COPY_AND_ASSIGN(TestCheckedObserver2);
+ };
+ 
+ using CheckedObserverListTest = ::testing::Test;
+diff --git a/base/one_shot_event_unittest.cc b/base/one_shot_event_unittest.cc
+index b6a47ffc8606..119e4d49138d 100644
+--- a/base/one_shot_event_unittest.cc
++++ b/base/one_shot_event_unittest.cc
+@@ -24,8 +24,6 @@ class RefCountedClass : public base::RefCounted<RefCountedClass> {
+       : did_delete_instance_(did_delete_instance) {
+     DCHECK(!*did_delete_instance_);
+   }
+-  RefCountedClass(const RefCountedClass&) = delete;
+-  RefCountedClass& operator=(const RefCountedClass&) = delete;
+ 
+   void PerformTask() { did_perform_task_ = true; }
+   bool did_perform_task() const { return did_perform_task_; }
+@@ -38,6 +36,8 @@ class RefCountedClass : public base::RefCounted<RefCountedClass> {
+   bool* const did_delete_instance_;  // Not owned.
+ 
+   bool did_perform_task_ = false;
++
++  DISALLOW_COPY_AND_ASSIGN(RefCountedClass);
+ };
+ 
+ TEST(OneShotEventTest, RecordsSignal) {
+diff --git a/base/pickle.h b/base/pickle.h
+index 7c888fcb5cf7..6e3a08239ad0 100644
+--- a/base/pickle.h
++++ b/base/pickle.h
+@@ -12,6 +12,7 @@
+ 
+ #include "base/base_export.h"
+ #include "base/check_op.h"
++#include "base/compiler_specific.h"
+ #include "base/containers/span.h"
+ #include "base/gtest_prod_util.h"
+ #include "base/memory/ref_counted.h"
+@@ -135,12 +136,12 @@ class BASE_EXPORT Pickle {
+   class BASE_EXPORT Attachment : public RefCountedThreadSafe<Attachment> {
+    public:
+     Attachment();
+-    Attachment(const Attachment&) = delete;
+-    Attachment& operator=(const Attachment&) = delete;
+ 
+    protected:
+     friend class RefCountedThreadSafe<Attachment>;
+     virtual ~Attachment();
++
++    DISALLOW_COPY_AND_ASSIGN(Attachment);
+   };
+ 
+   // Initialize a Pickle object using the default header size.
+diff --git a/base/run_loop.h b/base/run_loop.h
+index d714250671c2..ffea0d4de839 100644
+--- a/base/run_loop.h
++++ b/base/run_loop.h
+@@ -5,7 +5,6 @@
+ #ifndef BASE_RUN_LOOP_H_
+ #define BASE_RUN_LOOP_H_
+ 
+-#include <stack>
+ #include <utility>
+ #include <vector>
+ 
+@@ -13,6 +12,7 @@
+ #include "base/callback.h"
+ #include "base/containers/stack.h"
+ #include "base/gtest_prod_util.h"
++#include "base/macros.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/observer_list.h"
+diff --git a/base/run_loop_unittest.cc b/base/run_loop_unittest.cc
+index 25ebfd3428da..ff9fbf5779ed 100644
+--- a/base/run_loop_unittest.cc
++++ b/base/run_loop_unittest.cc
+@@ -5,13 +5,13 @@
+ #include "base/run_loop.h"
+ 
+ #include <functional>
+-#include <memory>
+ #include <utility>
+ 
+ #include "base/bind.h"
+ #include "base/bind_helpers.h"
+ #include "base/containers/queue.h"
+ #include "base/location.h"
++#include "base/macros.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/single_thread_task_runner.h"
+diff --git a/base/scoped_clear_last_error.h b/base/scoped_clear_last_error.h
+index 1268b2f4e907..435b376d38db 100644
+--- a/base/scoped_clear_last_error.h
++++ b/base/scoped_clear_last_error.h
+@@ -8,8 +8,6 @@
+ #include <errno.h>
+ 
+ #include "base/base_export.h"
+-// TODO(crbug.com/1010217) Remove once no #includers are getting base/macros.h
+-// by including this header.
+ #include "base/macros.h"
+ #include "build/build_config.h"
+ 
+diff --git a/base/scoped_generic.h b/base/scoped_generic.h
+index 8b56b03d82b0..fc5291acdafa 100644
+--- a/base/scoped_generic.h
++++ b/base/scoped_generic.h
+@@ -9,11 +9,9 @@
+ #include <ostream>
+ 
+ #include <algorithm>
+-#include <utility>
+ 
+ #include "base/check.h"
+-// TODO(crbug.com/1010217) Remove once no #includers are getting base/macros.h
+-// by including this header.
++#include "base/compiler_specific.h"
+ #include "base/macros.h"
+ 
+ namespace base {
+diff --git a/base/scoped_native_library.h b/base/scoped_native_library.h
+index 96765659a294..6935d141ba31 100644
+--- a/base/scoped_native_library.h
++++ b/base/scoped_native_library.h
+@@ -6,6 +6,7 @@
+ #define BASE_SCOPED_NATIVE_LIBRARY_H_
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/native_library.h"
+ #include "base/scoped_generic.h"
+ 
+diff --git a/base/scoped_observer.h b/base/scoped_observer.h
+index f97265f52c41..411e9d17577c 100644
+--- a/base/scoped_observer.h
++++ b/base/scoped_observer.h
+@@ -10,6 +10,7 @@
+ #include <vector>
+ 
+ #include "base/check.h"
++#include "base/macros.h"
+ #include "base/ranges/algorithm.h"
+ #include "base/stl_util.h"
+ 
+diff --git a/base/sequence_checker.h b/base/sequence_checker.h
+index 3ab8768a1bba..d7e9afab2fe0 100644
+--- a/base/sequence_checker.h
++++ b/base/sequence_checker.h
+@@ -6,6 +6,7 @@
+ #define BASE_SEQUENCE_CHECKER_H_
+ 
+ #include "base/check.h"
++#include "base/compiler_specific.h"
+ #include "base/sequence_checker_impl.h"
+ #include "base/strings/string_piece.h"
+ #include "build/build_config.h"
+@@ -99,11 +100,12 @@ class LOCKABLE SequenceCheckerDoNothing {
+   SequenceCheckerDoNothing(SequenceCheckerDoNothing&& other) = default;
+   SequenceCheckerDoNothing& operator=(SequenceCheckerDoNothing&& other) =
+       default;
+-  SequenceCheckerDoNothing(const SequenceCheckerDoNothing&) = delete;
+-  SequenceCheckerDoNothing& operator=(const SequenceCheckerDoNothing&) = delete;
+ 
+   bool CalledOnValidSequence() const WARN_UNUSED_RESULT { return true; }
+   void DetachFromSequence() {}
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(SequenceCheckerDoNothing);
+ };
+ 
+ #if DCHECK_IS_ON()
+diff --git a/base/sequence_checker_impl.cc b/base/sequence_checker_impl.cc
+index 75b010413a0f..fbf638c95f59 100644
+--- a/base/sequence_checker_impl.cc
++++ b/base/sequence_checker_impl.cc
+@@ -4,8 +4,6 @@
+ 
+ #include "base/sequence_checker_impl.h"
+ 
+-#include <utility>
+-
+ #include "base/check.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/sequence_token.h"
+diff --git a/base/sequence_checker_impl.h b/base/sequence_checker_impl.h
+index f472111ae230..3a6d36d154be 100644
+--- a/base/sequence_checker_impl.h
++++ b/base/sequence_checker_impl.h
+@@ -8,6 +8,8 @@
+ #include <memory>
+ 
+ #include "base/base_export.h"
++#include "base/compiler_specific.h"
++#include "base/macros.h"
+ #include "base/synchronization/lock.h"
+ #include "base/thread_annotations.h"
+ 
+diff --git a/base/sequence_checker_unittest.cc b/base/sequence_checker_unittest.cc
+index d2b40bd22ed8..a7625933eb43 100644
+--- a/base/sequence_checker_unittest.cc
++++ b/base/sequence_checker_unittest.cc
+@@ -8,11 +8,11 @@
+ 
+ #include <memory>
+ #include <string>
+-#include <utility>
+ 
+ #include "base/bind.h"
+ #include "base/bind_helpers.h"
+ #include "base/callback_forward.h"
++#include "base/macros.h"
+ #include "base/sequence_token.h"
+ #include "base/single_thread_task_runner.h"
+ #include "base/task/post_task.h"
+diff --git a/base/sequence_token.h b/base/sequence_token.h
+index ee4bda65180b..0647a2000ca4 100644
+--- a/base/sequence_token.h
++++ b/base/sequence_token.h
+@@ -6,6 +6,7 @@
+ #define BASE_SEQUENCE_TOKEN_H_
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ 
+ namespace base {
+ 
+diff --git a/base/sequenced_task_runner_unittest.cc b/base/sequenced_task_runner_unittest.cc
+index 185a70087e72..544b2585a1b6 100644
+--- a/base/sequenced_task_runner_unittest.cc
++++ b/base/sequenced_task_runner_unittest.cc
+@@ -23,8 +23,6 @@ class FlagOnDelete {
+                scoped_refptr<SequencedTaskRunner> expected_deletion_sequence)
+       : deleted_(deleted),
+         expected_deletion_sequence_(std::move(expected_deletion_sequence)) {}
+-  FlagOnDelete(const FlagOnDelete&) = delete;
+-  FlagOnDelete& operator=(const FlagOnDelete&) = delete;
+ 
+  private:
+   friend class DeleteHelper<FlagOnDelete>;
+@@ -40,13 +38,11 @@ class FlagOnDelete {
+ 
+   bool* deleted_;
+   const scoped_refptr<SequencedTaskRunner> expected_deletion_sequence_;
++
++  DISALLOW_COPY_AND_ASSIGN(FlagOnDelete);
+ };
+ 
+ class SequencedTaskRunnerTest : public testing::Test {
+- public:
+-  SequencedTaskRunnerTest(const SequencedTaskRunnerTest&) = delete;
+-  SequencedTaskRunnerTest& operator=(const SequencedTaskRunnerTest&) = delete;
+-
+  protected:
+   SequencedTaskRunnerTest() : foreign_thread_("foreign") {}
+ 
+@@ -61,6 +57,8 @@ class SequencedTaskRunnerTest : public testing::Test {
+ 
+  private:
+   test::TaskEnvironment task_environment_;
++
++  DISALLOW_COPY_AND_ASSIGN(SequencedTaskRunnerTest);
+ };
+ 
+ using SequenceBoundUniquePtr =
+diff --git a/base/supports_user_data.h b/base/supports_user_data.h
+index 929c76cf23ea..9c7f18eece69 100644
+--- a/base/supports_user_data.h
++++ b/base/supports_user_data.h
+@@ -9,6 +9,7 @@
+ #include <memory>
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/sequence_checker.h"
+ 
+diff --git a/base/sync_socket.h b/base/sync_socket.h
+index 5289403132d7..29aace4ead02 100644
+--- a/base/sync_socket.h
++++ b/base/sync_socket.h
+@@ -12,7 +12,9 @@
+ #include <stddef.h>
+ 
+ #include "base/base_export.h"
++#include "base/compiler_specific.h"
+ #include "base/files/platform_file.h"
++#include "base/macros.h"
+ #include "base/synchronization/waitable_event.h"
+ #include "base/time/time.h"
+ #include "build/build_config.h"
+diff --git a/base/sync_socket_unittest.cc b/base/sync_socket_unittest.cc
+index c6c9c0a87bcd..59b6d4a0c6f7 100644
+--- a/base/sync_socket_unittest.cc
++++ b/base/sync_socket_unittest.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "base/sync_socket.h"
+ 
++#include "base/macros.h"
+ #include "base/synchronization/waitable_event.h"
+ #include "base/threading/platform_thread.h"
+ #include "base/threading/simple_thread.h"
+diff --git a/base/syslog_logging.h b/base/syslog_logging.h
+index 401a9ee99d98..b67aeff4bba2 100644
+--- a/base/syslog_logging.h
++++ b/base/syslog_logging.h
+@@ -38,14 +38,15 @@ void BASE_EXPORT ResetEventSourceForTesting();
+ class BASE_EXPORT EventLogMessage {
+  public:
+   EventLogMessage(const char* file, int line, LogSeverity severity);
+-  EventLogMessage(const EventLogMessage&) = delete;
+-  EventLogMessage& operator=(const EventLogMessage&) = delete;
++
+   ~EventLogMessage();
+ 
+   std::ostream& stream() { return log_message_.stream(); }
+ 
+  private:
+   LogMessage log_message_;
++
++  DISALLOW_COPY_AND_ASSIGN(EventLogMessage);
+ };
+ 
+ }  // namespace logging
+diff --git a/base/task/sequence_manager/atomic_flag_set.h b/base/task/sequence_manager/atomic_flag_set.h
+index 42dd2b1bb34f..a0e392cd0523 100644
+--- a/base/task/sequence_manager/atomic_flag_set.h
++++ b/base/task/sequence_manager/atomic_flag_set.h
+@@ -28,8 +28,7 @@ class BASE_EXPORT AtomicFlagSet {
+ 
+  public:
+   explicit AtomicFlagSet(scoped_refptr<AssociatedThreadId> associated_thread);
+-  AtomicFlagSet(const AtomicFlagSet&) = delete;
+-  AtomicFlagSet& operator=(const AtomicFlagSet&) = delete;
++
+   // AtomicFlags need to be released (or deleted) before this can be deleted.
+   ~AtomicFlagSet();
+ 
+@@ -90,8 +89,6 @@ class BASE_EXPORT AtomicFlagSet {
+   // AtomicFlag's with one bit per flag.
+   struct BASE_EXPORT Group {
+     Group();
+-    Group(const Group&) = delete;
+-    Group& operator=(const Group&) = delete;
+     ~Group();
+ 
+     static constexpr int kNumFlags = sizeof(size_t) * 8;
+@@ -115,6 +112,9 @@ class BASE_EXPORT AtomicFlagSet {
+     // Computes the index of the |flag_callbacks| based on the number of leading
+     // zero bits in |flag|.
+     static int IndexOfFirstFlagSet(size_t flag);
++
++   private:
++    DISALLOW_COPY_AND_ASSIGN(Group);
+   };
+ 
+  private:
+@@ -131,6 +131,8 @@ class BASE_EXPORT AtomicFlagSet {
+   scoped_refptr<AssociatedThreadId> associated_thread_;
+   std::unique_ptr<Group> alloc_list_head_;
+   Group* partially_free_list_head_ = nullptr;
++
++  DISALLOW_COPY_AND_ASSIGN(AtomicFlagSet);
+ };
+ 
+ }  // namespace internal
+diff --git a/base/task/sequence_manager/enqueue_order_generator.h b/base/task/sequence_manager/enqueue_order_generator.h
+index 4833b7ee357b..2ee5828687c8 100644
+--- a/base/task/sequence_manager/enqueue_order_generator.h
++++ b/base/task/sequence_manager/enqueue_order_generator.h
+@@ -11,6 +11,7 @@
+ #include <atomic>
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/task/sequence_manager/enqueue_order.h"
+ 
+ namespace base {
+diff --git a/base/task/sequence_manager/lazily_deallocated_deque.h b/base/task/sequence_manager/lazily_deallocated_deque.h
+index b34a4b917bc0..06e1939aedcc 100644
+--- a/base/task/sequence_manager/lazily_deallocated_deque.h
++++ b/base/task/sequence_manager/lazily_deallocated_deque.h
+@@ -8,12 +8,12 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <memory>
+-#include <utility>
+ #include <vector>
+ 
+ #include "base/check_op.h"
+ #include "base/debug/alias.h"
+ #include "base/gtest_prod_util.h"
++#include "base/macros.h"
+ #include "base/time/time.h"
+ 
+ namespace base {
+diff --git a/base/task/sequence_manager/lazy_now.h b/base/task/sequence_manager/lazy_now.h
+index ddb908981dc8..5e93ae352e08 100644
+--- a/base/task/sequence_manager/lazy_now.h
++++ b/base/task/sequence_manager/lazy_now.h
+@@ -6,6 +6,7 @@
+ #define BASE_TASK_SEQUENCE_MANAGER_LAZY_NOW_H_
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/optional.h"
+ #include "base/time/time.h"
+ 
+diff --git a/base/task/sequence_manager/real_time_domain.h b/base/task/sequence_manager/real_time_domain.h
+index a3ad62862e0d..f2531b1ad85b 100644
+--- a/base/task/sequence_manager/real_time_domain.h
++++ b/base/task/sequence_manager/real_time_domain.h
+@@ -6,6 +6,7 @@
+ #define BASE_TASK_SEQUENCE_MANAGER_REAL_TIME_DOMAIN_H_
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/task/sequence_manager/time_domain.h"
+ 
+ namespace base {
+diff --git a/base/task/sequence_manager/sequence_manager.h b/base/task/sequence_manager/sequence_manager.h
+index 69e7f7d4f425..d5a247b0c0a6 100644
+--- a/base/task/sequence_manager/sequence_manager.h
++++ b/base/task/sequence_manager/sequence_manager.h
+@@ -6,9 +6,9 @@
+ #define BASE_TASK_SEQUENCE_MANAGER_SEQUENCE_MANAGER_H_
+ 
+ #include <memory>
+-#include <string>
+ #include <utility>
+ 
++#include "base/macros.h"
+ #include "base/message_loop/message_pump_type.h"
+ #include "base/message_loop/timer_slack.h"
+ #include "base/sequenced_task_runner.h"
+diff --git a/base/task/sequence_manager/sequence_manager_impl.h b/base/task/sequence_manager/sequence_manager_impl.h
+index 225dd4a69a58..ea0db5530cb8 100644
+--- a/base/task/sequence_manager/sequence_manager_impl.h
++++ b/base/task/sequence_manager/sequence_manager_impl.h
+@@ -11,7 +11,6 @@
+ #include <memory>
+ #include <random>
+ #include <set>
+-#include <string>
+ #include <unordered_map>
+ #include <utility>
+ 
+@@ -19,6 +18,7 @@
+ #include "base/cancelable_callback.h"
+ #include "base/containers/circular_deque.h"
+ #include "base/debug/crash_logging.h"
++#include "base/macros.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/message_loop/message_pump_type.h"
+diff --git a/base/task/sequence_manager/sequence_manager_perftest.cc b/base/task/sequence_manager/sequence_manager_perftest.cc
+index cc8d8136aa92..5ea530c2cced 100644
+--- a/base/task/sequence_manager/sequence_manager_perftest.cc
++++ b/base/task/sequence_manager/sequence_manager_perftest.cc
+@@ -56,8 +56,6 @@ perf_test::PerfResultReporter SetUpReporter(const std::string& story_name) {
+ class PerfTestTimeDomain : public MockTimeDomain {
+  public:
+   PerfTestTimeDomain() : MockTimeDomain(TimeTicks::Now()) {}
+-  PerfTestTimeDomain(const PerfTestTimeDomain&) = delete;
+-  PerfTestTimeDomain& operator=(const PerfTestTimeDomain&) = delete;
+   ~PerfTestTimeDomain() override = default;
+ 
+   Optional<TimeDelta> DelayTillNextTask(LazyNow* lazy_now) override {
+@@ -74,6 +72,9 @@ class PerfTestTimeDomain : public MockTimeDomain {
+     if (NumberOfScheduledWakeUps() == 1u)
+       RequestDoWork();
+   }
++
++ private:
++  DISALLOW_COPY_AND_ASSIGN(PerfTestTimeDomain);
+ };
+ 
+ enum class PerfTestType {
+diff --git a/base/task/sequence_manager/task_queue.h b/base/task/sequence_manager/task_queue.h
+index 9c5b72549ddd..465aceca7304 100644
+--- a/base/task/sequence_manager/task_queue.h
++++ b/base/task/sequence_manager/task_queue.h
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ 
++#include "base/macros.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/optional.h"
+ #include "base/single_thread_task_runner.h"
+diff --git a/base/task/sequence_manager/task_queue_impl.h b/base/task/sequence_manager/task_queue_impl.h
+index 3ef7f4306491..422a1bc0a0ba 100644
+--- a/base/task/sequence_manager/task_queue_impl.h
++++ b/base/task/sequence_manager/task_queue_impl.h
+@@ -10,9 +10,9 @@
+ #include <memory>
+ #include <queue>
+ #include <set>
+-#include <utility>
+ 
+ #include "base/callback.h"
++#include "base/macros.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/observer_list.h"
+ #include "base/pending_task.h"
+diff --git a/base/task/sequence_manager/task_queue_selector.h b/base/task/sequence_manager/task_queue_selector.h
+index 34aef8234d5b..3906dec8eb08 100644
+--- a/base/task/sequence_manager/task_queue_selector.h
++++ b/base/task/sequence_manager/task_queue_selector.h
+@@ -7,9 +7,8 @@
+ 
+ #include <stddef.h>
+ 
+-#include <vector>
+-
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/pending_task.h"
+ #include "base/task/sequence_manager/sequence_manager.h"
+ #include "base/task/sequence_manager/sequenced_task_source.h"
+diff --git a/base/task/sequence_manager/task_queue_selector_unittest.cc b/base/task/sequence_manager/task_queue_selector_unittest.cc
+index 82dee2f932b7..00693dad794d 100644
+--- a/base/task/sequence_manager/task_queue_selector_unittest.cc
++++ b/base/task/sequence_manager/task_queue_selector_unittest.cc
+@@ -13,6 +13,7 @@
+ #include <vector>
+ 
+ #include "base/bind.h"
++#include "base/macros.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/pending_task.h"
+ #include "base/task/sequence_manager/enqueue_order_generator.h"
+diff --git a/base/task/sequence_manager/task_time_observer.h b/base/task/sequence_manager/task_time_observer.h
+index e1b876d71312..1f78ac24902d 100644
+--- a/base/task/sequence_manager/task_time_observer.h
++++ b/base/task/sequence_manager/task_time_observer.h
+@@ -5,6 +5,7 @@
+ #ifndef BASE_TASK_SEQUENCE_MANAGER_TASK_TIME_OBSERVER_H_
+ #define BASE_TASK_SEQUENCE_MANAGER_TASK_TIME_OBSERVER_H_
+ 
++#include "base/macros.h"
+ #include "base/time/time.h"
+ 
+ namespace base {
+diff --git a/base/task/sequence_manager/tasks.h b/base/task/sequence_manager/tasks.h
+index b043ceec40bb..8da9e256bb55 100644
+--- a/base/task/sequence_manager/tasks.h
++++ b/base/task/sequence_manager/tasks.h
+@@ -29,8 +29,6 @@ struct BASE_EXPORT PostedTask {
+                       Nestable nestable = Nestable::kNestable,
+                       TaskType task_type = kTaskTypeNone);
+   PostedTask(PostedTask&& move_from) noexcept;
+-  PostedTask(const PostedTask&) = delete;
+-  PostedTask& operator=(const PostedTask&) = delete;
+   ~PostedTask();
+ 
+   OnceClosure callback;
+@@ -43,6 +41,8 @@ struct BASE_EXPORT PostedTask {
+   scoped_refptr<SequencedTaskRunner> task_runner;
+   // The time at which the task was queued.
+   TimeTicks queue_time;
++
++  DISALLOW_COPY_AND_ASSIGN(PostedTask);
+ };
+ 
+ // Represents a time at which a task wants to run. Tasks scheduled for the
+diff --git a/base/task/sequence_manager/test/mock_time_domain.h b/base/task/sequence_manager/test/mock_time_domain.h
+index dca937f34fea..c9070edd7aa9 100644
+--- a/base/task/sequence_manager/test/mock_time_domain.h
++++ b/base/task/sequence_manager/test/mock_time_domain.h
+@@ -15,8 +15,6 @@ namespace sequence_manager {
+ class MockTimeDomain : public TimeDomain {
+  public:
+   explicit MockTimeDomain(TimeTicks initial_now_ticks);
+-  MockTimeDomain(const MockTimeDomain&) = delete;
+-  MockTimeDomain& operator=(const MockTimeDomain&) = delete;
+   ~MockTimeDomain() override;
+ 
+   void SetNowTicks(TimeTicks now_ticks);
+@@ -31,6 +29,8 @@ class MockTimeDomain : public TimeDomain {
+ 
+  private:
+   TimeTicks now_ticks_;
++
++  DISALLOW_COPY_AND_ASSIGN(MockTimeDomain);
+ };
+ 
+ }  // namespace sequence_manager
+diff --git a/base/task/sequence_manager/thread_controller_impl.h b/base/task/sequence_manager/thread_controller_impl.h
+index df112423ef8a..896dbbe65bf0 100644
+--- a/base/task/sequence_manager/thread_controller_impl.h
++++ b/base/task/sequence_manager/thread_controller_impl.h
+@@ -8,6 +8,7 @@
+ #include <memory>
+ 
+ #include "base/cancelable_callback.h"
++#include "base/macros.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/run_loop.h"
+ #include "base/sequence_checker.h"
+diff --git a/base/task/sequence_manager/thread_controller_with_message_pump_impl.h b/base/task/sequence_manager/thread_controller_with_message_pump_impl.h
+index 5c15c853a4c1..26ad7339cbe7 100644
+--- a/base/task/sequence_manager/thread_controller_with_message_pump_impl.h
++++ b/base/task/sequence_manager/thread_controller_with_message_pump_impl.h
+@@ -40,10 +40,6 @@ class BASE_EXPORT ThreadControllerWithMessagePumpImpl
+   ThreadControllerWithMessagePumpImpl(
+       std::unique_ptr<MessagePump> message_pump,
+       const SequenceManager::Settings& settings);
+-  ThreadControllerWithMessagePumpImpl(
+-      const ThreadControllerWithMessagePumpImpl&) = delete;
+-  ThreadControllerWithMessagePumpImpl& operator=(
+-      const ThreadControllerWithMessagePumpImpl&) = delete;
+   ~ThreadControllerWithMessagePumpImpl() override;
+ 
+   using ShouldScheduleWork = WorkDeduplicator::ShouldScheduleWork;
+@@ -201,6 +197,8 @@ class BASE_EXPORT ThreadControllerWithMessagePumpImpl
+   // Reset at the start of each unit of work to cover the work itself and then
+   // transition to the next one.
+   base::Optional<HangWatchScopeEnabled> hang_watch_scope_;
++
++  DISALLOW_COPY_AND_ASSIGN(ThreadControllerWithMessagePumpImpl);
+ };
+ 
+ }  // namespace internal
+diff --git a/base/task/sequence_manager/time_domain.h b/base/task/sequence_manager/time_domain.h
+index 37f4414af1b5..5b6529d7705a 100644
+--- a/base/task/sequence_manager/time_domain.h
++++ b/base/task/sequence_manager/time_domain.h
+@@ -9,6 +9,7 @@
+ 
+ #include "base/callback.h"
+ #include "base/check.h"
++#include "base/macros.h"
+ #include "base/task/common/intrusive_heap.h"
+ #include "base/task/sequence_manager/lazy_now.h"
+ #include "base/task/sequence_manager/task_queue_impl.h"
+diff --git a/base/task/sequence_manager/time_domain_unittest.cc b/base/task/sequence_manager/time_domain_unittest.cc
+index 2d5b32ea8e43..130872f480c1 100644
+--- a/base/task/sequence_manager/time_domain_unittest.cc
++++ b/base/task/sequence_manager/time_domain_unittest.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <memory>
+ 
++#include "base/macros.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/message_loop/message_pump.h"
+ #include "base/message_loop/message_pump_type.h"
+diff --git a/base/task/sequence_manager/work_queue.h b/base/task/sequence_manager/work_queue.h
+index 68532740aea4..77bdc127520e 100644
+--- a/base/task/sequence_manager/work_queue.h
++++ b/base/task/sequence_manager/work_queue.h
+@@ -33,8 +33,6 @@ class BASE_EXPORT WorkQueue {
+ 
+   // Note |task_queue| can be null if queue_type is kNonNestable.
+   WorkQueue(TaskQueueImpl* task_queue, const char* name, QueueType queue_type);
+-  WorkQueue(const WorkQueue&) = delete;
+-  WorkQueue& operator=(const WorkQueue&) = delete;
+   ~WorkQueue();
+ 
+   // Associates this work queue with the given work queue sets. This must be
+@@ -182,6 +180,8 @@ class BASE_EXPORT WorkQueue {
+   const char* const name_;
+   EnqueueOrder fence_;
+   const QueueType queue_type_;
++
++  DISALLOW_COPY_AND_ASSIGN(WorkQueue);
+ };
+ 
+ }  // namespace internal
+diff --git a/base/task/sequence_manager/work_queue_sets.h b/base/task/sequence_manager/work_queue_sets.h
+index f55a03fc5e37..4d9009baac88 100644
+--- a/base/task/sequence_manager/work_queue_sets.h
++++ b/base/task/sequence_manager/work_queue_sets.h
+@@ -7,10 +7,10 @@
+ 
+ #include <array>
+ #include <map>
+-#include <vector>
+ 
+ #include "base/base_export.h"
+ #include "base/check_op.h"
++#include "base/macros.h"
+ #include "base/task/common/intrusive_heap.h"
+ #include "base/task/sequence_manager/sequence_manager.h"
+ #include "base/task/sequence_manager/task_queue_impl.h"
+diff --git a/base/trace_event/auto_open_close_event.h b/base/trace_event/auto_open_close_event.h
+index 8a89663a2b9c..2c6283234f8a 100644
+--- a/base/trace_event/auto_open_close_event.h
++++ b/base/trace_event/auto_open_close_event.h
+@@ -5,6 +5,7 @@
+ #ifndef BASE_TRACE_EVENT_AUTO_OPEN_CLOSE_EVENT_H_
+ #define BASE_TRACE_EVENT_AUTO_OPEN_CLOSE_EVENT_H_
+ 
++#include "base/macros.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/threading/thread_checker.h"
+ #include "base/time/time.h"
+diff --git a/base/trace_event/heap_profiler_allocation_context_tracker.cc b/base/trace_event/heap_profiler_allocation_context_tracker.cc
+index 6aa3125668e9..28fd0646d038 100644
+--- a/base/trace_event/heap_profiler_allocation_context_tracker.cc
++++ b/base/trace_event/heap_profiler_allocation_context_tracker.cc
+@@ -97,7 +97,8 @@ AllocationContextTracker::GetInstanceForCurrentThread() {
+   return tracker;
+ }
+ 
+-AllocationContextTracker::AllocationContextTracker() {
++AllocationContextTracker::AllocationContextTracker()
++    : thread_name_(nullptr), ignore_scope_depth_(0) {
+   tracked_stack_.reserve(kMaxStackDepth);
+   task_contexts_.reserve(kMaxTaskDepth);
+   task_contexts_.push_back("UntrackedTask");
+diff --git a/base/trace_event/heap_profiler_allocation_context_tracker.h b/base/trace_event/heap_profiler_allocation_context_tracker.h
+index 1ae1bd14c521..d1e2059b79a0 100644
+--- a/base/trace_event/heap_profiler_allocation_context_tracker.h
++++ b/base/trace_event/heap_profiler_allocation_context_tracker.h
+@@ -9,6 +9,7 @@
+ 
+ #include "base/atomicops.h"
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/trace_event/heap_profiler_allocation_context.h"
+ 
+ namespace base {
+diff --git a/base/trace_event/heap_profiler_event_filter.cc b/base/trace_event/heap_profiler_event_filter.cc
+index bb16d9c8e9ee..937072ca7b5e 100644
+--- a/base/trace_event/heap_profiler_event_filter.cc
++++ b/base/trace_event/heap_profiler_event_filter.cc
+@@ -32,6 +32,9 @@ inline AllocationContextTracker* GetThreadLocalTracker() {
+ // static
+ const char HeapProfilerEventFilter::kName[] = "heap_profiler_predicate";
+ 
++HeapProfilerEventFilter::HeapProfilerEventFilter() = default;
++HeapProfilerEventFilter::~HeapProfilerEventFilter() = default;
++
+ bool HeapProfilerEventFilter::FilterTraceEvent(
+     const TraceEvent& trace_event) const {
+   if (!IsPseudoStackEnabled())
+diff --git a/base/trace_event/heap_profiler_event_filter.h b/base/trace_event/heap_profiler_event_filter.h
+index 91508757203b..076e05de2b09 100644
+--- a/base/trace_event/heap_profiler_event_filter.h
++++ b/base/trace_event/heap_profiler_event_filter.h
+@@ -6,6 +6,7 @@
+ #define BASE_TRACE_EVENT_HEAP_PROFILER_EVENT_FILTER_H_
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/trace_event/trace_event_filter.h"
+ 
+ namespace base {
+diff --git a/base/trace_event/java_heap_dump_provider_android.cc b/base/trace_event/java_heap_dump_provider_android.cc
+index 624f743bc431..684f7301cfb1 100644
+--- a/base/trace_event/java_heap_dump_provider_android.cc
++++ b/base/trace_event/java_heap_dump_provider_android.cc
+@@ -16,6 +16,12 @@ JavaHeapDumpProvider* JavaHeapDumpProvider::GetInstance() {
+                    LeakySingletonTraits<JavaHeapDumpProvider>>::get();
+ }
+ 
++JavaHeapDumpProvider::JavaHeapDumpProvider() {
++}
++
++JavaHeapDumpProvider::~JavaHeapDumpProvider() {
++}
++
+ // Called at trace dump point time. Creates a snapshot with the memory counters
+ // for the current process.
+ bool JavaHeapDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
+diff --git a/base/trace_event/java_heap_dump_provider_android.h b/base/trace_event/java_heap_dump_provider_android.h
+index 37edab0e5136..3545f9088285 100644
+--- a/base/trace_event/java_heap_dump_provider_android.h
++++ b/base/trace_event/java_heap_dump_provider_android.h
+@@ -5,6 +5,7 @@
+ #ifndef BASE_TRACE_EVENT_JAVA_HEAP_DUMP_PROVIDER_ANDROID_H_
+ #define BASE_TRACE_EVENT_JAVA_HEAP_DUMP_PROVIDER_ANDROID_H_
+ 
++#include "base/macros.h"
+ #include "base/memory/singleton.h"
+ #include "base/trace_event/memory_dump_provider.h"
+ 
+diff --git a/base/trace_event/log_message.h b/base/trace_event/log_message.h
+index 30da1e1040c8..82d3bdb0f1d1 100644
+--- a/base/trace_event/log_message.h
++++ b/base/trace_event/log_message.h
+@@ -11,6 +11,7 @@
+ #include <string>
+ #include <vector>
+ 
++#include "base/macros.h"
+ #include "base/strings/string_piece.h"
+ #include "base/trace_event/trace_event_impl.h"
+ 
+diff --git a/base/trace_event/malloc_dump_provider.h b/base/trace_event/malloc_dump_provider.h
+index c84d936d4f76..66c71cbb6d60 100644
+--- a/base/trace_event/malloc_dump_provider.h
++++ b/base/trace_event/malloc_dump_provider.h
+@@ -5,6 +5,7 @@
+ #ifndef BASE_TRACE_EVENT_MALLOC_DUMP_PROVIDER_H_
+ #define BASE_TRACE_EVENT_MALLOC_DUMP_PROVIDER_H_
+ 
++#include "base/macros.h"
+ #include "base/memory/singleton.h"
+ #include "base/partition_alloc_buildflags.h"
+ #include "base/synchronization/lock.h"
+diff --git a/base/trace_event/memory_allocator_dump.h b/base/trace_event/memory_allocator_dump.h
+index d0fbb8af232d..979176a60e09 100644
+--- a/base/trace_event/memory_allocator_dump.h
++++ b/base/trace_event/memory_allocator_dump.h
+@@ -10,10 +10,10 @@
+ #include <memory>
+ #include <ostream>
+ #include <string>
+-#include <vector>
+ 
+ #include "base/base_export.h"
+ #include "base/gtest_prod_util.h"
++#include "base/macros.h"
+ #include "base/optional.h"
+ #include "base/trace_event/memory_allocator_dump_guid.h"
+ #include "base/trace_event/memory_dump_request_args.h"
+diff --git a/base/trace_event/memory_dump_manager.cc b/base/trace_event/memory_dump_manager.cc
+index c582d104071a..8a168e29c027 100644
+--- a/base/trace_event/memory_dump_manager.cc
++++ b/base/trace_event/memory_dump_manager.cc
+@@ -99,7 +99,10 @@ MemoryDumpManager::CreateInstanceForTesting() {
+   return instance;
+ }
+ 
+-MemoryDumpManager::MemoryDumpManager() = default;
++MemoryDumpManager::MemoryDumpManager()
++    : is_coordinator_(false),
++      tracing_process_id_(kInvalidTracingProcessId),
++      dumper_registrations_ignored_for_testing_(false) {}
+ 
+ MemoryDumpManager::~MemoryDumpManager() {
+   Thread* dump_thread = nullptr;
+@@ -287,7 +290,7 @@ MemoryDumpManager::GetOrCreateBgTaskRunnerLocked() {
+ void MemoryDumpManager::CreateProcessDump(const MemoryDumpRequestArgs& args,
+                                           ProcessMemoryDumpCallback callback) {
+   char guid_str[20];
+-  snprintf(guid_str, base::size(guid_str), "0x%" PRIx64, args.dump_guid);
++  sprintf(guid_str, "0x%" PRIx64, args.dump_guid);
+   TRACE_EVENT_NESTABLE_ASYNC_BEGIN1(kTraceCategory, "ProcessMemoryDump",
+                                     TRACE_ID_LOCAL(args.dump_guid), "dump_guid",
+                                     TRACE_STR_COPY(guid_str));
+diff --git a/base/trace_event/memory_dump_manager.h b/base/trace_event/memory_dump_manager.h
+index f83b4915f7e7..2a5e592aba46 100644
+--- a/base/trace_event/memory_dump_manager.h
++++ b/base/trace_event/memory_dump_manager.h
+@@ -13,6 +13,7 @@
+ #include <vector>
+ 
+ #include "base/atomicops.h"
++#include "base/macros.h"
+ #include "base/memory/ref_counted.h"
+ #include "base/memory/singleton.h"
+ #include "base/synchronization/lock.h"
+diff --git a/base/trace_event/memory_dump_provider.h b/base/trace_event/memory_dump_provider.h
+index 983940772cce..f6cb5680ec9b 100644
+--- a/base/trace_event/memory_dump_provider.h
++++ b/base/trace_event/memory_dump_provider.h
+@@ -6,6 +6,7 @@
+ #define BASE_TRACE_EVENT_MEMORY_DUMP_PROVIDER_H_
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/process/process_handle.h"
+ #include "base/trace_event/memory_dump_request_args.h"
+ 
+diff --git a/base/trace_event/memory_dump_scheduler.cc b/base/trace_event/memory_dump_scheduler.cc
+index a9ad57410e72..ac9b12bae6aa 100644
+--- a/base/trace_event/memory_dump_scheduler.cc
++++ b/base/trace_event/memory_dump_scheduler.cc
+@@ -20,7 +20,7 @@ MemoryDumpScheduler* MemoryDumpScheduler::GetInstance() {
+   return instance;
+ }
+ 
+-MemoryDumpScheduler::MemoryDumpScheduler() = default;
++MemoryDumpScheduler::MemoryDumpScheduler() : period_ms_(0), generation_(0) {}
+ MemoryDumpScheduler::~MemoryDumpScheduler() {
+   // Hit only in tests. Check that tests don't leave without stopping.
+   DCHECK(!is_enabled_for_testing());
+diff --git a/base/trace_event/memory_dump_scheduler.h b/base/trace_event/memory_dump_scheduler.h
+index bfccd6a6e701..21334f0edd04 100644
+--- a/base/trace_event/memory_dump_scheduler.h
++++ b/base/trace_event/memory_dump_scheduler.h
+@@ -2,8 +2,8 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-#ifndef BASE_TRACE_EVENT_MEMORY_DUMP_SCHEDULER_H_
+-#define BASE_TRACE_EVENT_MEMORY_DUMP_SCHEDULER_H_
++#ifndef BASE_TRACE_EVENT_MEMORY_DUMP_SCHEDULER_H
++#define BASE_TRACE_EVENT_MEMORY_DUMP_SCHEDULER_H
+ 
+ #include <stdint.h>
+ 
+@@ -43,9 +43,6 @@ class BASE_EXPORT MemoryDumpScheduler {
+ 
+   static MemoryDumpScheduler* GetInstance();
+ 
+-  MemoryDumpScheduler(const MemoryDumpScheduler&) = delete;
+-  MemoryDumpScheduler& operator=(const MemoryDumpScheduler&) = delete;
+-
+   void Start(Config, scoped_refptr<SequencedTaskRunner> task_runner);
+   void Stop();
+   bool is_enabled_for_testing() const { return bool(task_runner_); }
+@@ -63,16 +60,17 @@ class BASE_EXPORT MemoryDumpScheduler {
+   scoped_refptr<SequencedTaskRunner> task_runner_;
+ 
+   // These fields instead are only accessed from within the task runner.
+-  uint32_t period_ms_ = 0;  // 0 == disabled.
+-  // Used to invalidate outstanding tasks after Stop().
+-  uint32_t generation_ = 0;
++  uint32_t period_ms_;   // 0 == disabled.
++  uint32_t generation_;  // Used to invalidate outstanding tasks after Stop().
+   uint32_t tick_count_;
+   uint32_t light_dump_rate_;
+   uint32_t heavy_dump_rate_;
+   PeriodicCallback callback_;
++
++  DISALLOW_COPY_AND_ASSIGN(MemoryDumpScheduler);
+ };
+ 
+ }  // namespace trace_event
+ }  // namespace base
+ 
+-#endif  // BASE_TRACE_EVENT_MEMORY_DUMP_SCHEDULER_H_
++#endif  // BASE_TRACE_EVENT_MEMORY_DUMP_SCHEDULER_H
+diff --git a/base/trace_event/trace_arguments.h b/base/trace_event/trace_arguments.h
+index b658e8dd84b6..e2e9e987934b 100644
+--- a/base/trace_event/trace_arguments.h
++++ b/base/trace_event/trace_arguments.h
+@@ -11,9 +11,9 @@
+ #include <algorithm>
+ #include <memory>
+ #include <string>
+-#include <utility>
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/trace_event/common/trace_event_common.h"
+ 
+ // Trace macro can have one or two optional arguments, each one of them
+diff --git a/base/trace_event/trace_event.h b/base/trace_event/trace_event.h
+index a0cd28cfbdf7..ca4808b6095a 100644
+--- a/base/trace_event/trace_event.h
++++ b/base/trace_event/trace_event.h
+@@ -12,12 +12,11 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
+-#include <memory>
+ #include <string>
+-#include <utility>
+ 
+ #include "base/atomicops.h"
+ #include "base/debug/debugging_buildflags.h"
++#include "base/macros.h"
+ #include "base/time/time.h"
+ #include "base/time/time_override.h"
+ #include "base/trace_event/builtin_categories.h"
+diff --git a/base/trace_event/trace_event_filter_test_utils.h b/base/trace_event/trace_event_filter_test_utils.h
+index d3f0102aea3e..5fbb98e4a6c8 100644
+--- a/base/trace_event/trace_event_filter_test_utils.h
++++ b/base/trace_event/trace_event_filter_test_utils.h
+@@ -8,6 +8,7 @@
+ #include <memory>
+ #include <string>
+ 
++#include "base/macros.h"
+ #include "base/trace_event/trace_event_filter.h"
+ 
+ namespace base {
+diff --git a/base/trace_event/trace_event_impl.h b/base/trace_event/trace_event_impl.h
+index 04216fd29ff8..3e94cbd04b23 100644
+--- a/base/trace_event/trace_event_impl.h
++++ b/base/trace_event/trace_event_impl.h
+@@ -15,6 +15,7 @@
+ #include "base/atomicops.h"
+ #include "base/base_export.h"
+ #include "base/callback.h"
++#include "base/macros.h"
+ #include "base/observer_list.h"
+ #include "base/single_thread_task_runner.h"
+ #include "base/strings/string_util.h"
+diff --git a/base/trace_event/trace_event_memory_overhead.h b/base/trace_event/trace_event_memory_overhead.h
+index e7902c826723..32d7be9b2996 100644
+--- a/base/trace_event/trace_event_memory_overhead.h
++++ b/base/trace_event/trace_event_memory_overhead.h
+@@ -12,6 +12,7 @@
+ #include <unordered_map>
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ 
+ namespace base {
+ 
+diff --git a/base/trace_event/trace_event_stub.h b/base/trace_event/trace_event_stub.h
+index e11fcdd4aaea..86dd4003ebb3 100644
+--- a/base/trace_event/trace_event_stub.h
++++ b/base/trace_event/trace_event_stub.h
+@@ -7,10 +7,10 @@
+ 
+ #include <stddef.h>
+ 
+-#include <memory>
+ #include <string>
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/strings/string_piece.h"
+ #include "base/trace_event/common/trace_event_common.h"
+ #include "base/trace_event/memory_allocator_dump_guid.h"
+diff --git a/base/trace_event/trace_log.cc b/base/trace_event/trace_log.cc
+index 8244eb7fbf09..cd6787c76b8d 100644
+--- a/base/trace_event/trace_log.cc
++++ b/base/trace_event/trace_log.cc
+@@ -16,6 +16,7 @@
+ #include "base/debug/leak_annotations.h"
+ #include "base/location.h"
+ #include "base/logging.h"
++#include "base/macros.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/memory/ref_counted_memory.h"
+ #include "base/no_destructor.h"
+diff --git a/base/trace_event/traced_value.h b/base/trace_event/traced_value.h
+index 5c251e21342b..4a9fa9bfb323 100644
+--- a/base/trace_event/traced_value.h
++++ b/base/trace_event/traced_value.h
+@@ -12,6 +12,7 @@
+ #include <string>
+ #include <vector>
+ 
++#include "base/macros.h"
+ #include "base/pickle.h"
+ #include "base/strings/string_piece.h"
+ #include "base/trace_event/trace_event_impl.h"
+diff --git a/base/updateable_sequenced_task_runner.h b/base/updateable_sequenced_task_runner.h
+index f39c2570facb..061f6ba4f2e9 100644
+--- a/base/updateable_sequenced_task_runner.h
++++ b/base/updateable_sequenced_task_runner.h
+@@ -13,9 +13,6 @@ namespace base {
+ // A SequencedTaskRunner whose posted tasks' priorities can be updated.
+ class BASE_EXPORT UpdateableSequencedTaskRunner : public SequencedTaskRunner {
+  public:
+-  UpdateableSequencedTaskRunner(const UpdateableSequencedTaskRunner&) = delete;
+-  UpdateableSequencedTaskRunner& operator=(
+-      const UpdateableSequencedTaskRunner&) = delete;
+   // Updates the priority for tasks posted through this TaskRunner to
+   // |priority|.
+   virtual void UpdatePriority(TaskPriority priority) = 0;
+@@ -23,6 +20,8 @@ class BASE_EXPORT UpdateableSequencedTaskRunner : public SequencedTaskRunner {
+  protected:
+   UpdateableSequencedTaskRunner() = default;
+   ~UpdateableSequencedTaskRunner() override = default;
++
++  DISALLOW_COPY_AND_ASSIGN(UpdateableSequencedTaskRunner);
+ };
+ 
+ }  // namespace base
+diff --git a/base/values.h b/base/values.h
+index d3ef9abbae0a..ba03d4e26025 100644
+--- a/base/values.h
++++ b/base/values.h
+@@ -36,6 +36,7 @@
+ #include "base/containers/checked_range.h"
+ #include "base/containers/flat_map.h"
+ #include "base/containers/span.h"
++#include "base/macros.h"
+ #include "base/strings/string16.h"
+ #include "base/strings/string_piece.h"
+ #include "base/value_iterators.h"
+diff --git a/base/vlog.h b/base/vlog.h
+index 201daab6510e..4ce958e40eb1 100644
+--- a/base/vlog.h
++++ b/base/vlog.h
+@@ -9,6 +9,7 @@
+ #include <vector>
+ 
+ #include "base/base_export.h"
++#include "base/macros.h"
+ #include "base/strings/string_piece.h"
+ 
+ namespace logging {
+-- 
+2.29.2.299.gdc1121823c-goog
+

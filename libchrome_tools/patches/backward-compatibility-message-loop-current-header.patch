@@ -1,0 +1,28 @@
+From c7b649d256ae1d8322e54cffa111c160660e3c8d Mon Sep 17 00:00:00 2001
+From: hscham <hscham@chromium.org>
+Date: Fri, 29 Jan 2021 16:11:58 +0900
+Subject: [PATCH] Add empty header message_loop_current.h
+
+Change-Id: I79c7e69748da7e63ac65176dd9868bd35458f898
+---
+ base/message_loop/message_loop_current.h | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+ create mode 100644 base/message_loop/message_loop_current.h
+
+diff --git a/base/message_loop/message_loop_current.h b/base/message_loop/message_loop_current.h
+new file mode 100644
+index 0000000000..190e98bd1f
+--- /dev/null
++++ /base/message_loop/message_loop_current.h
+@@ -0,0 +1,8 @@
++// Copyright 2021 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_MESSAGE_LOOP_MESSAGE_LOOP_CURRENT_H_
++#define BASE_MESSAGE_LOOP_MESSAGE_LOOP_CURRENT_H_
++
++#endif  // BASE_MESSAGE_LOOP_MESSAGE_LOOP_CURRENT_H_
+-- 
+2.30.0.365.g02bc693789-goog
+

@@ -4,6 +4,7 @@
 
 module mojo_base.mojom;
 
+[Stable]
 struct FilePath {
   // In chrome, ninja have a goal that can define file_path_is_string for a set
   // of mojom files.

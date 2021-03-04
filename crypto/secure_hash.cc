@@ -13,6 +13,7 @@
 #include <stddef.h>
 
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/pickle.h"
 #include "crypto/openssl_util.h"
 

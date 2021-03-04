@@ -1,0 +1,49 @@
+diff --git a/base/check.h b/base/check.h
+index 3ff3095988a2..900d41d9127a 100644
+--- a/base/check.h
++++ b/base/check.h
+@@ -11,6 +11,7 @@
+ #include "base/compiler_specific.h"
+ #include "base/dcheck_is_on.h"
+ #include "base/immediate_crash.h"
++#include "base/logging.h"
+ #include "base/macros.h"
+ 
+ // This header defines the CHECK, DCHECK, and DPCHECK macros.
+diff --git a/base/logging.cc b/base/logging.cc
+index 81b80d89b1e3..63a9d639cee5 100644
+--- a/base/logging.cc
++++ b/base/logging.cc
+@@ -8,13 +8,10 @@
+ // build time. Try not to raise this limit unless absolutely necessary. See
+ // https://chromium.googlesource.com/chromium/src/+/HEAD/docs/wmax_tokens.md
+ #ifndef NACL_TC_REV
+-#pragma clang max_tokens_here 350000
++// Increase token due to changed include files.
++#pragma clang max_tokens_here 370000
+ #endif  // NACL_TC_REV
+ 
+-#ifdef BASE_CHECK_H_
+-#error "logging.h should not include check.h"
+-#endif
+-
+ #include <limits.h>
+ #include <stdint.h>
+ 
+diff --git a/base/logging.h b/base/logging.h
+index 0fb480feaca3..4fba1551af61 100644
+--- a/base/logging.h
++++ b/base/logging.h
+@@ -14,8 +14,12 @@
+ 
+ #include "base/base_export.h"
+ #include "base/callback_forward.h"
++#include "base/check.h"
++#include "base/check_op.h"
+ #include "base/compiler_specific.h"
+ #include "base/dcheck_is_on.h"
++#include "base/macros.h"
++#include "base/notreached.h"
+ #include "base/scoped_clear_last_error.h"
+ #include "base/strings/string_piece_forward.h"
+

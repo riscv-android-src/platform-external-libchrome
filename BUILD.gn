@@ -86,6 +86,7 @@ libbase_sublibs = [
       "modp_b64",
     ]
     pkg_deps = [
+      "absl",
       "glib-2.0",
       "libevent",
     ]
@@ -107,6 +108,7 @@ libbase_sublibs = [
       "base/check_op.cc",
       "base/command_line.cc",
       "base/containers/intrusive_heap.cc",
+      "base/containers/linked_list.cc",
       "base/cpu.cc",
       "base/debug/activity_tracker.cc",
       "base/debug/alias.cc",
@@ -133,6 +135,7 @@ libbase_sublibs = [
       "base/files/file_util_linux.cc",
       "base/files/file_util_posix.cc",
       "base/files/important_file_writer.cc",
+      "base/files/important_file_writer_cleaner.cc",
       "base/files/memory_mapped_file.cc",
       "base/files/memory_mapped_file_posix.cc",
       "base/files/scoped_file.cc",
@@ -151,7 +154,9 @@ libbase_sublibs = [
       "base/lazy_instance_helpers.cc",
       "base/location.cc",
       "base/logging.cc",
+      "base/logging_chromeos.cc",
       "base/memory/aligned_memory.cc",
+      "base/memory/memory_pressure_listener.cc",
       "base/memory/platform_shared_memory_region.cc",
       "base/memory/platform_shared_memory_region_posix.cc",
       "base/memory/read_only_shared_memory_region.cc",
@@ -163,7 +168,6 @@ libbase_sublibs = [
       "base/memory/unsafe_shared_memory_region.cc",
       "base/memory/weak_ptr.cc",
       "base/memory/writable_shared_memory_region.cc",
-      "base/message_loop/message_loop_current.cc",
       "base/message_loop/message_pump.cc",
       "base/message_loop/message_pump_default.cc",
       "base/message_loop/message_pump_glib.cc",
@@ -227,6 +231,7 @@ libbase_sublibs = [
       "base/sequence_checker_impl.cc",
       "base/sequence_token.cc",
       "base/sequenced_task_runner.cc",
+      "base/strings/escape.cc",
       "base/strings/nullable_string16.cc",
       "base/strings/pattern.cc",
       "base/strings/safe_sprintf.cc",
@@ -239,6 +244,7 @@ libbase_sublibs = [
       "base/strings/string_util_constants.cc",
       "base/strings/stringprintf.cc",
       "base/strings/sys_string_conversions_posix.cc",
+      "base/strings/utf_offset_string_conversions.cc",
       "base/strings/utf_string_conversion_utils.cc",
       "base/strings/utf_string_conversions.cc",
       "base/sync_socket.cc",
@@ -258,6 +264,7 @@ libbase_sublibs = [
       "base/task/common/operations_controller.cc",
       "base/task/common/scoped_defer_task_posting.cc",
       "base/task/common/task_annotator.cc",
+      "base/task/current_thread.cc",
       "base/task/lazy_thread_pool_task_runner.cc",
       "base/task/post_task.cc",
       "base/task/scoped_set_task_priority_for_current_thread.cc",
@@ -293,10 +300,10 @@ libbase_sublibs = [
       "base/task/thread_pool/pooled_task_runner_delegate.cc",
       "base/task/thread_pool/priority_queue.cc",
       "base/task/thread_pool/sequence.cc",
-      "base/task/thread_pool/sequence_sort_key.cc",
       "base/task/thread_pool/service_thread.cc",
       "base/task/thread_pool/task.cc",
       "base/task/thread_pool/task_source.cc",
+      "base/task/thread_pool/task_source_sort_key.cc",
       "base/task/thread_pool/task_tracker.cc",
       "base/task/thread_pool/task_tracker_posix.cc",
       "base/task/thread_pool/thread_group.cc",
@@ -307,7 +314,6 @@ libbase_sublibs = [
       "base/task/thread_pool/worker_thread_stack.cc",
       "base/task_runner.cc",
       "base/third_party/dynamic_annotations/dynamic_annotations.c",
-      "base/third_party/icu/icu_utf.cc",
       "base/third_party/nspr/prtime.cc",
       "base/threading/hang_watcher.cc",
       "base/threading/platform_thread.cc",
@@ -407,7 +413,10 @@ if (use.crypto) {
         ":base-core",
         ":base-dl",
       ]
-      libs = [ "dl" ]
+      libs = [
+        "dl",
+        "pthread",
+      ]
       pkg_deps = [
         "nss",
         "openssl",
@@ -446,7 +455,10 @@ if (use.dbus) {
     {
       name = "base-dbus"
       deps = [ ":base-core" ]
-      pkg_deps = [ "dbus-1" ]
+      pkg_deps = [
+        "absl",
+        "dbus-1",
+      ]
       if (use.fuzzer) {
         pkg_deps += [ "protobuf" ]
       } else {
@@ -592,7 +604,8 @@ generate_pkg_config("libchrome") {
       requires_private += attr.pkg_deps
     }
   }
-  libs = [ "-lbase" ]
+  # base/synchronization/lock_impl.h has function inlined that uses pthread.
+  libs = [ "-lbase", "-lpthread" ]
   libs_private = []
   foreach(attr, libbase_sublibs) {
     if (!defined(attr.testonly) || !attr.testonly) {

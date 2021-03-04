@@ -1,0 +1,30 @@
+From 46a9d822246e83661083cda3f55a4c5f272c22de Mon Sep 17 00:00:00 2001
+From: hscham <hscham@chromium.org>
+Date: Wed, 2 Dec 2020 11:21:34 +0900
+Subject: [PATCH] Add explicit cast to initialize unsigned result from char
+
+For libchrome uprev in Chrome OS which uses -Wc++11-narrowing.
+
+BUG=chromium:1144735
+TEST=autoninja -C out/Default chrome
+---
+ base/big_endian.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/base/big_endian.h b/base/big_endian.h
+index 1ef321dd4911..13a0b9ba4c53 100644
+--- a/base/big_endian.h
++++ b/base/big_endian.h
+@@ -24,7 +24,8 @@ inline void ReadBigEndian(const char buf[], T* out) {
+   static_assert(std::is_integral<T>::value, "T has to be an integral type.");
+   // Make an unsigned version of the output type to make shift possible
+   // without UB.
+-  typename std::make_unsigned<T>::type unsigned_result = uint8_t{buf[0]};
++  typename std::make_unsigned<T>::type unsigned_result =
++      static_cast<uint8_t>(buf[0]);
+   for (size_t i = 1; i < sizeof(T); ++i) {
+     unsigned_result <<= 8;
+     // Must cast to uint8_t to avoid clobbering by sign extension.
+-- 
+2.29.2.576.ga3fc446d84-goog
+

@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "crypto/secure_util.h"
 #include "crypto/symmetric_key.h"
 

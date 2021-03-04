@@ -1,18 +1,16 @@
 # This file will be used by emerge in libchrome-XXXX.ebuild to determine the
 # order of applying patches.
 
+# TODO(crbug.com/1184584): Add empty header for use in ap-aogh
+backward-compatibility-message-loop-current-header.patch
+
 # Remove glib dependency.
 # TODO(hidehiko): Fix the config in AOSP libchrome.
 libchrome-Remove-glib-dependency.patch
 
 # Refer to crbug/1093642 on upstream or abandon these two patches.
-# Add WaitForServiceToBeAvailable back for MockObjectProxy
-WaitForServiceToBeAvailable.patch
 # Add MockObjectManager, which is removed upstream.
 add-mock-object-manager.patch
-
-# Remove after r802050
-libchrome-fix-integer-overflow-if-microseconds-is-IN.patch
 
 # Solve name conflict with abseil in absl package, when a program in Chromium
 # OS depends on both abseil and libchrome.
@@ -22,38 +20,14 @@ absl-thread-annotation-conflict.patch
 # We don't need.
 revert-crbug-1001171.patch
 
-# Remove after uprev to r780000
+# Backward compatibility patches for header change.
+# Deprecate DISALLOW_COPY_AND_ASSIGN from macros.h
+backward-compatibility-disallow-copy-and-assign.patch
+# NOTREACHED moved to base/notreached.h from base/check.h
+backward-compatibility-notreached.patch
+
+# Cherry-pick from r833197 for -Wc++11-narrowing
+explicit-cast-from-char-to-unsigned-type.patch
+
+# Remove after uprev to r837885
 py3.patch
-
-# Remove after uprev to r784327
-forward-compatibility-file-util.patch
-
-# Remove after uprev to r784774
-forward-compatibility-current-thread.patch
-
-# Remove after uprev to r798820
-forward-compatibility-string-utils.patch
-
-# Remove after uprev to r806478
-forward-compatibility-file-lock.patch
-
-# Remove after uprev to r806816
-android-allow-null-exception-reporter.patch
-
-# Remove after uprev to r807076
-0001-Fix-pending_broker_clients-handling.patch
-
-# Remove after uprev to r798795
-mojo-core-io-runner-subclass.patch
-
-# Remove after uprev to r810524
-0001-Allow-ChromeOS-to-use-syslog-format-for-LogMessages.patch
-
-# Remove after uprev to r811858
-forward-compatibility-base-value.patch
-
-# Remove after uprev to r820304
-forward-compatibility-mojo-un-wrap-platform-file.patch
-
-# Remove after uprev to r820349
-forward-compatibility-logging.patch

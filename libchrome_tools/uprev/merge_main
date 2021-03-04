@@ -1,0 +1,19 @@
+#!/bin/bash
+# Copyright 2020 The Chromium OS Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# ./merge_main
+# Merge m/main to current workspace, and reset the merged result as
+# (p1=m/main, p2=current:p2) with the same commit message.
+# This can be used to update the current commit when m/main has new changes
+# during uprev work period.
+PARENT=$(git cat-file commit HEAD | egrep '^parent' | tail -n 1 | cut -d' ' -f2)
+MSG="$(git cat-file commit HEAD | tail -n +7)"
+
+git merge m/main
+(source ~/.bashrc; env PS1="change >" bash --norc)
+
+TREE=$(git cat-file commit HEAD | egrep '^tree' | cut -d' ' -f2)
+NEW=$(git commit-tree "$TREE" -p m/main -p "$PARENT" < <(echo "$MSG"))
+git reset --hard "$NEW"

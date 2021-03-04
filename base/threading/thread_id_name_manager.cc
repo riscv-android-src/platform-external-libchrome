@@ -14,7 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/threading/thread_local.h"
 // Unsupported in libchrome.
-// #include "base/trace_event/heap_profiler_allocation_context_tracker.h"
+// #include "base/trace_event/heap_profiler_allocation_context_tracker.h"  // no-presubmit-check
 
 namespace base {
 namespace {
