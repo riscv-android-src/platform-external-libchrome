@@ -1,0 +1,42 @@
+From c832d63fd7675e441080277ee0227008d0a610fb Mon Sep 17 00:00:00 2001
+From: hscham <hscham@chromium.org>
+Date: Mon, 8 Mar 2021 19:18:07 +0900
+Subject: [PATCH 1/2] Include new header files in old ones
+
+base/bind_helpers.h content will be moved to base/callback_helpers.h and
+base/test/bind_test_util.h to (new) base/test/bind.h
+
+Change-Id: I926feebdc9b6dc2e6d810314edf4bcd39324359a
+---
+ base/callback_helpers.h | 1 +
+ base/test/bind.h        | 6 ++++++
+ 2 files changed, 7 insertions(+)
+ create mode 100644 base/test/bind.h
+
+diff --git a/base/callback_helpers.h b/base/callback_helpers.h
+index 2ed101122b..2389b865d9 100644
+--- a/base/callback_helpers.h
++++ b/base/callback_helpers.h
+@@ -16,6 +16,7 @@
+ 
+ #include "base/atomicops.h"
+ #include "base/bind.h"
++#include "base/bind_helpers.h"
+ #include "base/callback.h"
+ #include "base/compiler_specific.h"
+ #include "base/memory/ptr_util.h"
+diff --git a/base/test/bind.h b/base/test/bind.h
+new file mode 100644
+index 0000000000..31571a7f25
+--- /dev/null
++++ b/base/test/bind.h
+@@ -0,0 +1,6 @@
++#ifndef CHROMEOS2_SRC_AOSP_EXTERNAL_LIBCHROME_BASE_TEST_BIND_H_
++#define CHROMEOS2_SRC_AOSP_EXTERNAL_LIBCHROME_BASE_TEST_BIND_H_
++
++#include "base/test/bind_test_util.h"
++
++#endif  // CHROMEOS2_SRC_AOSP_EXTERNAL_LIBCHROME_BASE_TEST_BIND_H_
+-- 
+2.30.1.766.gb4fecdf3b7-goog
+

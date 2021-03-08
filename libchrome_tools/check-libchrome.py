@@ -18,16 +18,12 @@ import sys
 BAD_KEYWORDS = {
     b'DISALLOW_COPY_AND_ASSIGN':
     'Chromium agreed to return Google C++ style. Use deleted constructor in `public:` manually. See crbug/1010217',
-    b'base::DeleteFile\(':
-    '2-param base::DeleteFile will be deprecated. Use 1-param base::DeleteFile for non-recursive and base::DeletePathRecursively for recursive deletions',
-    b'base::DeleteFileRecursively':
-    'Use base::DeletePathRecursively instead',
-    b'LOG_(VERBOSE|INFO|WARNING|ERROR|FATAL|NUM_SEVERITIES|DFATAL)':
-    'Use LOGGING_* instead',
-    b'\.(start|end)s_with\(':
-    'BasicStringPiece::{starts,ends}_with will be deprecatd. Use base::{Starts,Ends}With instead',
-    b'MessageLoopCurrent(|ForIO|ForUI)':
-    'Use base::Current{,IO,UI}Thread instead with header "base/task/current_thread.h"',
+    b'include.*base\/bind_helpers.h':
+    'File will be removed, please import base/callback_helpers.h instead',
+    b'include.*base/test/bind_test_util.h':
+    'File will be removed, please import base/test/bind.h instead',
+    b'include.*mojo\/public\/cpp\/bindings\/binding.h':
+    'Old mojo bindings types will be deprecated, please convert to the new one. See closed chromium tracking crbug/955171 for details',
 }
 
 

@@ -29,3 +29,8 @@ explicit-cast-from-char-to-unsigned-type.patch
 
 # Remove after uprev to r837885
 py3.patch
+
+# Forward compatibility patches for r860220 uprev
+forward-compatibility-new-header-files.patch
+forward-compatibility-base-MakeStringPiece.patch
+forward-compatibility-FilePathWatcher-Watch-with-enum-type.patch
