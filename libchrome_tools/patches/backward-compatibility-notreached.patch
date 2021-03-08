@@ -1,5 +1,5 @@
 diff --git a/base/check.h b/base/check.h
-index 3ff3095988a2..900d41d9127a 100644
+index c5a37d1279b0..b1eeb59cbfe4 100644
 --- a/base/check.h
 +++ b/base/check.h
 @@ -11,6 +11,7 @@
@@ -7,11 +7,11 @@ index 3ff3095988a2..900d41d9127a 100644
  #include "base/dcheck_is_on.h"
  #include "base/immediate_crash.h"
 +#include "base/logging.h"
- #include "base/macros.h"
  
  // This header defines the CHECK, DCHECK, and DPCHECK macros.
+ //
 diff --git a/base/logging.cc b/base/logging.cc
-index 81b80d89b1e3..63a9d639cee5 100644
+index 2033ea75e991..c538b799d68a 100644
 --- a/base/logging.cc
 +++ b/base/logging.cc
 @@ -8,13 +8,10 @@
@@ -46,4 +46,4 @@ index 0fb480feaca3..4fba1551af61 100644
 +#include "base/notreached.h"
  #include "base/scoped_clear_last_error.h"
  #include "base/strings/string_piece_forward.h"
-
+ 

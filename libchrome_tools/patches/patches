@@ -21,8 +21,6 @@ absl-thread-annotation-conflict.patch
 revert-crbug-1001171.patch
 
 # Backward compatibility patches for header change.
-# Deprecate DISALLOW_COPY_AND_ASSIGN from macros.h
-backward-compatibility-disallow-copy-and-assign.patch
 # NOTREACHED moved to base/notreached.h from base/check.h
 backward-compatibility-notreached.patch
 
