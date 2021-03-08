@@ -34,7 +34,7 @@ diff --git a/base/logging.h b/base/logging.h
 index 0fb480feaca3..4fba1551af61 100644
 --- a/base/logging.h
 +++ b/base/logging.h
-@@ -14,8 +14,12 @@
+@@ -14,8 +14,11 @@
  
  #include "base/base_export.h"
  #include "base/callback_forward.h"
@@ -42,7 +42,6 @@ index 0fb480feaca3..4fba1551af61 100644
 +#include "base/check_op.h"
  #include "base/compiler_specific.h"
  #include "base/dcheck_is_on.h"
-+#include "base/macros.h"
 +#include "base/notreached.h"
  #include "base/scoped_clear_last_error.h"
  #include "base/strings/string_piece_forward.h"
