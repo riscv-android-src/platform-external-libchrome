@@ -39,9 +39,16 @@ typedef struct AHardwareBuffer AHardwareBuffer;
 
 typedef struct AImage AImage;
 
+typedef struct AImageCropRect {
+  int32_t left;
+  int32_t top;
+  int32_t right;
+  int32_t bottom;
+} AImageCropRect;
+
 enum AIMAGE_FORMATS {
   AIMAGE_FORMAT_YUV_420_888 = 0x23,
-  IMAGE_FORMAT_PRIVATE = 0x22
+  AIMAGE_FORMAT_PRIVATE = 0x22
 };
 
 using pAImage_delete = void (*)(AImage* image);
@@ -57,6 +64,9 @@ using pAImage_getWidth = media_status_t (*)(const AImage* image,
 using pAImage_getHeight = media_status_t (*)(const AImage* image,
                                              int32_t* height);
 
+using pAImage_getCropRect = media_status_t (*)(const AImage* image,
+                                               AImageCropRect* rect);
+
 // For AImageReader
 
 typedef struct AImageReader AImageReader;
@@ -68,11 +78,12 @@ typedef struct AImageReader_ImageListener {
   AImageReader_ImageCallback onImageAvailable;
 } AImageReader_ImageListener;
 
-using pAImageReader_new = media_status_t (*)(int32_t width,
-                                             int32_t height,
-                                             int32_t format,
-                                             int32_t maxImages,
-                                             AImageReader** reader);
+using pAImageReader_newWithUsage = media_status_t (*)(int32_t width,
+                                                      int32_t height,
+                                                      int32_t format,
+                                                      uint64_t usage,
+                                                      int32_t maxImages,
+                                                      AImageReader** reader);
 
 using pAImageReader_setImageListener =
     media_status_t (*)(AImageReader* reader,
@@ -83,7 +94,15 @@ using pAImageReader_delete = void (*)(AImageReader* reader);
 using pAImageReader_getWindow = media_status_t (*)(AImageReader* reader,
                                                    ANativeWindow** window);
 
+using pAImageReader_getFormat = media_status_t (*)(const AImageReader* reader,
+                                                   int32_t* format);
+
 using pAImageReader_acquireLatestImageAsync =
+    media_status_t (*)(AImageReader* reader,
+                       AImage** image,
+                       int* acquireFenceFd);
+
+using pAImageReader_acquireNextImageAsync =
     media_status_t (*)(AImageReader* reader,
                        AImage** image,
                        int* acquireFenceFd);

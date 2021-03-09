@@ -15,13 +15,13 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/param.h>
-#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "base/base_switches.h"
+#include "base/bits.h"
 #include "base/command_line.h"
 #include "base/containers/stack.h"
 #include "base/environment.h"
@@ -29,22 +29,26 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/singleton.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/stl_util.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/sys_info.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/system/sys_info.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/time/time.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
 #include <AvailabilityMacros.h>
 #include "base/mac/foundation_util.h"
 #endif
@@ -68,34 +72,13 @@ namespace base {
 
 namespace {
 
-#if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL) || \
-  defined(OS_FUCHSIA) || (defined(OS_ANDROID) && __ANDROID_API__ < 21)
-int CallStat(const char* path, stat_wrapper_t* sb) {
-  AssertBlockingAllowed();
-  return stat(path, sb);
-}
-int CallLstat(const char* path, stat_wrapper_t* sb) {
-  AssertBlockingAllowed();
-  return lstat(path, sb);
-}
-#else
-int CallStat(const char* path, stat_wrapper_t* sb) {
-  AssertBlockingAllowed();
-  return stat64(path, sb);
-}
-int CallLstat(const char* path, stat_wrapper_t* sb) {
-  AssertBlockingAllowed();
-  return lstat64(path, sb);
-}
-#endif
-
 #if !defined(OS_NACL_NONSFI)
 // Helper for VerifyPathControlledByUser.
 bool VerifySpecificPathControlledByUser(const FilePath& path,
                                         uid_t owner_uid,
                                         const std::set<gid_t>& group_gids) {
   stat_wrapper_t stat_info;
-  if (CallLstat(path.value().c_str(), &stat_info) != 0) {
+  if (File::Lstat(path.value().c_str(), &stat_info) != 0) {
     DPLOG(ERROR) << "Failed to get information on path "
                  << path.value();
     return false;
@@ -112,7 +95,7 @@ bool VerifySpecificPathControlledByUser(const FilePath& path,
   }
 
   if ((stat_info.st_mode & S_IWGRP) &&
-      !ContainsKey(group_gids, stat_info.st_gid)) {
+      !Contains(group_gids, stat_info.st_gid)) {
     DLOG(ERROR) << "Path " << path.value()
                 << " is writable by an unprivileged group.";
     return false;
@@ -126,21 +109,13 @@ bool VerifySpecificPathControlledByUser(const FilePath& path,
   return true;
 }
 
-std::string TempFileName() {
-#if defined(OS_MACOSX)
-  return StringPrintf(".%s.XXXXXX", base::mac::BaseBundleID());
-#endif
-
-#if defined(GOOGLE_CHROME_BUILD)
-  return std::string(".com.google.Chrome.XXXXXX");
-#else
-  return std::string(".org.chromium.Chromium.XXXXXX");
-#endif
+base::FilePath GetTempTemplate() {
+  return FormatTemporaryFileName("XXXXXX");
 }
 
 bool AdvanceEnumeratorWithStat(FileEnumerator* traversal,
                                FilePath* out_next_path,
-                               struct stat* out_next_stat) {
+                               stat_wrapper_t* out_next_stat) {
   DCHECK(out_next_path);
   DCHECK(out_next_stat);
   *out_next_path = traversal->Next();
@@ -151,37 +126,11 @@ bool AdvanceEnumeratorWithStat(FileEnumerator* traversal,
   return true;
 }
 
-bool CopyFileContents(File* infile, File* outfile) {
-  static constexpr size_t kBufferSize = 32768;
-  std::vector<char> buffer(kBufferSize);
-
-  for (;;) {
-    ssize_t bytes_read = infile->ReadAtCurrentPos(buffer.data(), buffer.size());
-    if (bytes_read < 0)
-      return false;
-    if (bytes_read == 0)
-      return true;
-    // Allow for partial writes
-    ssize_t bytes_written_per_read = 0;
-    do {
-      ssize_t bytes_written_partial = outfile->WriteAtCurrentPos(
-          &buffer[bytes_written_per_read], bytes_read - bytes_written_per_read);
-      if (bytes_written_partial < 0)
-        return false;
-
-      bytes_written_per_read += bytes_written_partial;
-    } while (bytes_written_per_read < bytes_read);
-  }
-
-  NOTREACHED();
-  return false;
-}
-
 bool DoCopyDirectory(const FilePath& from_path,
                      const FilePath& to_path,
                      bool recursive,
                      bool open_exclusive) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   // Some old callers of CopyDirectory want it to support wildcards.
   // After some discussion, we decided to fix those callers.
   // Break loudly here if anyone tries to do this.
@@ -214,9 +163,9 @@ bool DoCopyDirectory(const FilePath& from_path,
 
   // We have to mimic windows behavior here. |to_path| may not exist yet,
   // start the loop with |to_path|.
-  struct stat from_stat;
+  stat_wrapper_t from_stat;
   FilePath current = from_path;
-  if (stat(from_path.value().c_str(), &from_stat) < 0) {
+  if (File::Stat(from_path.value().c_str(), &from_stat) < 0) {
     DPLOG(ERROR) << "CopyDirectory() couldn't stat source directory: "
                  << from_path.value();
     return false;
@@ -267,8 +216,8 @@ bool DoCopyDirectory(const FilePath& from_path,
       return false;
     }
 
-    struct stat stat_at_use;
-    if (fstat(infile.GetPlatformFile(), &stat_at_use) < 0) {
+    stat_wrapper_t stat_at_use;
+    if (File::Fstat(infile.GetPlatformFile(), &stat_at_use) < 0) {
       DPLOG(ERROR) << "CopyDirectory() couldn't stat file: " << current.value();
       return false;
     }
@@ -294,9 +243,9 @@ bool DoCopyDirectory(const FilePath& from_path,
     // source file's permissions into account. On the other platforms, we just
     // use the base::File constructor. On Chrome OS, base::File uses a different
     // set of permissions than it does on other POSIX platforms.
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
     int mode = 0600 | (stat_at_use.st_mode & 0177);
-#elif defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
     int mode = 0644;
 #else
     int mode = 0600;
@@ -308,7 +257,7 @@ bool DoCopyDirectory(const FilePath& from_path,
       return false;
     }
 
-    if (!CopyFileContents(&infile, &outfile)) {
+    if (!CopyFileContents(infile, outfile)) {
       DLOG(ERROR) << "CopyDirectory() couldn't copy file: " << current.value();
       return false;
     }
@@ -316,48 +265,29 @@ bool DoCopyDirectory(const FilePath& from_path,
 
   return true;
 }
-#endif  // !defined(OS_NACL_NONSFI)
-
-#if !defined(OS_MACOSX)
-// Appends |mode_char| to |mode| before the optional character set encoding; see
-// https://www.gnu.org/software/libc/manual/html_node/Opening-Streams.html for
-// details.
-std::string AppendModeCharacter(StringPiece mode, char mode_char) {
-  std::string result(mode.as_string());
-  size_t comma_pos = result.find(',');
-  result.insert(comma_pos == std::string::npos ? result.length() : comma_pos, 1,
-                mode_char);
-  return result;
-}
-#endif
-
-}  // namespace
-
-#if !defined(OS_NACL_NONSFI)
-FilePath MakeAbsoluteFilePath(const FilePath& input) {
-  AssertBlockingAllowed();
-  char full_path[PATH_MAX];
-  if (realpath(input.value().c_str(), full_path) == nullptr)
-    return FilePath();
-  return FilePath(full_path);
-}
 
 // TODO(erikkay): The Windows version of this accepts paths like "foo/bar/*"
 // which works both with and without the recursive flag.  I'm not sure we need
 // that functionality. If not, remove from file_util_win.cc, otherwise add it
 // here.
-bool DeleteFile(const FilePath& path, bool recursive) {
-  AssertBlockingAllowed();
+bool DoDeleteFile(const FilePath& path, bool recursive) {
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
+
+#if defined(OS_ANDROID)
+  if (path.IsContentUri())
+    return DeleteContentUri(path);
+#endif  // defined(OS_ANDROID)
+
   const char* path_str = path.value().c_str();
   stat_wrapper_t file_info;
-  if (CallLstat(path_str, &file_info) != 0) {
+  if (File::Lstat(path_str, &file_info) != 0) {
     // The Windows version defines this condition as success.
-    return (errno == ENOENT || errno == ENOTDIR);
+    return (errno == ENOENT);
   }
   if (!S_ISDIR(file_info.st_mode))
-    return (unlink(path_str) == 0);
+    return (unlink(path_str) == 0) || (errno == ENOENT);
   if (!recursive)
-    return (rmdir(path_str) == 0);
+    return (rmdir(path_str) == 0) || (errno == ENOENT);
 
   bool success = true;
   stack<std::string> directories;
@@ -370,21 +300,54 @@ bool DeleteFile(const FilePath& path, bool recursive) {
     if (traversal.GetInfo().IsDirectory())
       directories.push(current.value());
     else
-      success &= (unlink(current.value().c_str()) == 0);
+      success &= (unlink(current.value().c_str()) == 0) || (errno == ENOENT);
   }
 
   while (!directories.empty()) {
     FilePath dir = FilePath(directories.top());
     directories.pop();
-    success &= (rmdir(dir.value().c_str()) == 0);
+    success &= (rmdir(dir.value().c_str()) == 0) || (errno == ENOENT);
   }
   return success;
+}
+#endif  // !defined(OS_NACL_NONSFI)
+
+#if !defined(OS_APPLE)
+// Appends |mode_char| to |mode| before the optional character set encoding; see
+// https://www.gnu.org/software/libc/manual/html_node/Opening-Streams.html for
+// details.
+std::string AppendModeCharacter(StringPiece mode, char mode_char) {
+  std::string result(mode);
+  size_t comma_pos = result.find(',');
+  result.insert(comma_pos == std::string::npos ? result.length() : comma_pos, 1,
+                mode_char);
+  return result;
+}
+#endif
+
+}  // namespace
+
+#if !defined(OS_NACL_NONSFI)
+FilePath MakeAbsoluteFilePath(const FilePath& input) {
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
+  char full_path[PATH_MAX];
+  if (realpath(input.value().c_str(), full_path) == nullptr)
+    return FilePath();
+  return FilePath(full_path);
+}
+
+bool DeleteFile(const FilePath& path) {
+  return DoDeleteFile(path, /*recursive=*/false);
+}
+
+bool DeletePathRecursively(const FilePath& path) {
+  return DoDeleteFile(path, /*recursive=*/true);
 }
 
 bool ReplaceFile(const FilePath& from_path,
                  const FilePath& to_path,
                  File::Error* error) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   if (rename(from_path.value().c_str(), to_path.value().c_str()) == 0)
     return true;
   if (error)
@@ -405,8 +368,19 @@ bool CopyDirectoryExcl(const FilePath& from_path,
 }
 #endif  // !defined(OS_NACL_NONSFI)
 
+bool CreatePipe(ScopedFD* read_fd, ScopedFD* write_fd, bool non_blocking) {
+  int fds[2];
+  bool created =
+      non_blocking ? CreateLocalNonBlockingPipe(fds) : (0 == pipe(fds));
+  if (!created)
+    return false;
+  read_fd->reset(fds[0]);
+  write_fd->reset(fds[1]);
+  return true;
+}
+
 bool CreateLocalNonBlockingPipe(int fds[2]) {
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   return pipe2(fds, O_CLOEXEC | O_NONBLOCK) == 0;
 #else
   int raw_fds[2];
@@ -455,7 +429,7 @@ bool SetCloseOnExec(int fd) {
 }
 
 bool PathExists(const FilePath& path) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
 #if defined(OS_ANDROID)
   if (path.IsContentUri()) {
     return ContentUriExists(path);
@@ -465,16 +439,23 @@ bool PathExists(const FilePath& path) {
 }
 
 #if !defined(OS_NACL_NONSFI)
+bool PathIsReadable(const FilePath& path) {
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
+  return access(path.value().c_str(), R_OK) == 0;
+}
+#endif  // !defined(OS_NACL_NONSFI)
+
+#if !defined(OS_NACL_NONSFI)
 bool PathIsWritable(const FilePath& path) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   return access(path.value().c_str(), W_OK) == 0;
 }
 #endif  // !defined(OS_NACL_NONSFI)
 
 bool DirectoryExists(const FilePath& path) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   stat_wrapper_t file_info;
-  if (CallStat(path.value().c_str(), &file_info) != 0)
+  if (File::Stat(path.value().c_str(), &file_info) != 0)
     return false;
   return S_ISDIR(file_info.st_mode);
 }
@@ -493,15 +474,17 @@ bool ReadFromFD(int fd, char* buffer, size_t bytes) {
 
 #if !defined(OS_NACL_NONSFI)
 
-int CreateAndOpenFdForTemporaryFileInDir(const FilePath& directory,
-                                         FilePath* path) {
-  AssertBlockingAllowed();  // For call to mkstemp().
-  *path = directory.Append(TempFileName());
+ScopedFD CreateAndOpenFdForTemporaryFileInDir(const FilePath& directory,
+                                              FilePath* path) {
+  ScopedBlockingCall scoped_blocking_call(
+      FROM_HERE,
+      BlockingType::MAY_BLOCK);  // For call to mkstemp().
+  *path = directory.Append(GetTempTemplate());
   const std::string& tmpdir_string = path->value();
   // this should be OK since mkstemp just replaces characters in place
   char* buffer = const_cast<char*>(tmpdir_string.c_str());
 
-  return HANDLE_EINTR(mkstemp(buffer));
+  return ScopedFD(HANDLE_EINTR(mkstemp(buffer)));
 }
 
 #if !defined(OS_FUCHSIA)
@@ -517,9 +500,20 @@ bool ReadSymbolicLink(const FilePath& symlink_path, FilePath* target_path) {
   DCHECK(!symlink_path.empty());
   DCHECK(target_path);
   char buf[PATH_MAX];
-  ssize_t count = ::readlink(symlink_path.value().c_str(), buf, arraysize(buf));
+  ssize_t count =
+      ::readlink(symlink_path.value().c_str(), buf, base::size(buf));
 
-  if (count <= 0) {
+#if defined(OS_ANDROID) && defined(__LP64__)
+  // A few 64-bit Android L/M devices return INT_MAX instead of -1 here for
+  // errors; this is related to bionic's (incorrect) definition of ssize_t as
+  // being long int instead of int. Cast it so the compiler generates the
+  // comparison we want here. https://crbug.com/1101940
+  bool error = static_cast<int32_t>(count) <= 0;
+#else
+  bool error = count <= 0;
+#endif
+
+  if (error) {
     target_path->clear();
     return false;
   }
@@ -529,13 +523,13 @@ bool ReadSymbolicLink(const FilePath& symlink_path, FilePath* target_path) {
 }
 
 bool GetPosixFilePermissions(const FilePath& path, int* mode) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   DCHECK(mode);
 
   stat_wrapper_t file_info;
   // Uses stat(), because on symbolic link, lstat() does not return valid
   // permission bits in st_mode
-  if (CallStat(path.value().c_str(), &file_info) != 0)
+  if (File::Stat(path.value().c_str(), &file_info) != 0)
     return false;
 
   *mode = file_info.st_mode & FILE_PERMISSION_MASK;
@@ -544,12 +538,12 @@ bool GetPosixFilePermissions(const FilePath& path, int* mode) {
 
 bool SetPosixFilePermissions(const FilePath& path,
                              int mode) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   DCHECK_EQ(mode & ~FILE_PERMISSION_MASK, 0);
 
   // Calls stat() so that we can preserve the higher bits like S_ISGID.
   stat_wrapper_t stat_buf;
-  if (CallStat(path.value().c_str(), &stat_buf) != 0)
+  if (File::Stat(path.value().c_str(), &stat_buf) != 0)
     return false;
 
   // Clears the existing permission bits, and adds the new ones.
@@ -583,7 +577,7 @@ bool ExecutableExistsInPath(Environment* env,
 
 #endif  // !OS_FUCHSIA
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_APPLE)
 // This is implemented in file_util_mac.mm for Mac.
 bool GetTempDir(FilePath* path) {
   const char* tmp = getenv("TMPDIR");
@@ -593,21 +587,17 @@ bool GetTempDir(FilePath* path) {
   }
 
 #if defined(OS_ANDROID)
-#if 0 // This is for building Chromium browser on Android.
   return PathService::Get(DIR_CACHE, path);
-#endif
-  *path = FilePath("/data/local/tmp");
-  return true;
 #else
   *path = FilePath("/tmp");
   return true;
 #endif
 }
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_APPLE)
 
-#if !defined(OS_MACOSX)  // Mac implementation is in file_util_mac.mm.
+#if !defined(OS_APPLE)  // Mac implementation is in file_util_mac.mm.
 FilePath GetHomeDir() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   if (SysInfo::IsRunningOnChromeOS()) {
     // On Chrome OS chrome::DIR_USER_DATA is overridden with a primary user
     // homedir once it becomes available. Return / as the safe option.
@@ -630,43 +620,53 @@ FilePath GetHomeDir() {
   // Last resort.
   return FilePath("/tmp");
 }
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_APPLE)
 
-bool CreateTemporaryFile(FilePath* path) {
-  AssertBlockingAllowed();  // For call to close().
-  FilePath directory;
-  if (!GetTempDir(&directory))
-    return false;
-  int fd = CreateAndOpenFdForTemporaryFileInDir(directory, path);
-  if (fd < 0)
-    return false;
-  close(fd);
-  return true;
-}
-
-FILE* CreateAndOpenTemporaryFileInDir(const FilePath& dir, FilePath* path) {
-  int fd = CreateAndOpenFdForTemporaryFileInDir(dir, path);
-  if (fd < 0)
-    return nullptr;
-
-  FILE* file = fdopen(fd, "a+");
-  if (!file)
-    close(fd);
-  return file;
+File CreateAndOpenTemporaryFileInDir(const FilePath& dir, FilePath* temp_file) {
+  // For call to close() inside ScopedFD.
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
+  ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(dir, temp_file);
+  return fd.is_valid() ? File(std::move(fd)) : File(File::GetLastFileError());
 }
 
 bool CreateTemporaryFileInDir(const FilePath& dir, FilePath* temp_file) {
-  AssertBlockingAllowed();  // For call to close().
-  int fd = CreateAndOpenFdForTemporaryFileInDir(dir, temp_file);
-  return ((fd >= 0) && !IGNORE_EINTR(close(fd)));
+  // For call to close() inside ScopedFD.
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
+  ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(dir, temp_file);
+  return fd.is_valid();
+}
+
+FilePath FormatTemporaryFileName(FilePath::StringPieceType identifier) {
+#if defined(OS_APPLE)
+  StringPiece prefix = base::mac::BaseBundleID();
+#elif BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  StringPiece prefix = "com.google.Chrome";
+#else
+  StringPiece prefix = "org.chromium.Chromium";
+#endif
+  return FilePath(StrCat({".", prefix, ".", identifier}));
+}
+
+ScopedFILE CreateAndOpenTemporaryStreamInDir(const FilePath& dir,
+                                             FilePath* path) {
+  ScopedFD scoped_fd = CreateAndOpenFdForTemporaryFileInDir(dir, path);
+  if (!scoped_fd.is_valid())
+    return nullptr;
+
+  int fd = scoped_fd.release();
+  FILE* file = fdopen(fd, "a+");
+  if (!file)
+    close(fd);
+  return ScopedFILE(file);
 }
 
 static bool CreateTemporaryDirInDirImpl(const FilePath& base_dir,
-                                        const FilePath::StringType& name_tmpl,
+                                        const FilePath& name_tmpl,
                                         FilePath* new_dir) {
-  AssertBlockingAllowed();  // For call to mkdtemp().
-  DCHECK(name_tmpl.find("XXXXXX") != FilePath::StringType::npos)
-      << "Directory name template must contain \"XXXXXX\".";
+  ScopedBlockingCall scoped_blocking_call(
+      FROM_HERE, BlockingType::MAY_BLOCK);  // For call to mkdtemp().
+  DCHECK(EndsWith(name_tmpl.value(), "XXXXXX"))
+      << "Directory name template must end with \"XXXXXX\".";
 
   FilePath sub_dir = base_dir.Append(name_tmpl);
   std::string sub_dir_string = sub_dir.value();
@@ -686,8 +686,9 @@ bool CreateTemporaryDirInDir(const FilePath& base_dir,
                              const FilePath::StringType& prefix,
                              FilePath* new_dir) {
   FilePath::StringType mkdtemp_template = prefix;
-  mkdtemp_template.append(FILE_PATH_LITERAL("XXXXXX"));
-  return CreateTemporaryDirInDirImpl(base_dir, mkdtemp_template, new_dir);
+  mkdtemp_template.append("XXXXXX");
+  return CreateTemporaryDirInDirImpl(base_dir, FilePath(mkdtemp_template),
+                                     new_dir);
 }
 
 bool CreateNewTempDirectory(const FilePath::StringType& prefix,
@@ -696,12 +697,13 @@ bool CreateNewTempDirectory(const FilePath::StringType& prefix,
   if (!GetTempDir(&tmpdir))
     return false;
 
-  return CreateTemporaryDirInDirImpl(tmpdir, TempFileName(), new_temp_path);
+  return CreateTemporaryDirInDirImpl(tmpdir, GetTempTemplate(), new_temp_path);
 }
 
 bool CreateDirectoryAndGetError(const FilePath& full_path,
                                 File::Error* error) {
-  AssertBlockingAllowed();  // For call to mkdir().
+  ScopedBlockingCall scoped_blocking_call(
+      FROM_HERE, BlockingType::MAY_BLOCK);  // For call to mkdir().
   std::vector<FilePath> subpaths;
 
   // Collect a list of all parent directories.
@@ -714,14 +716,13 @@ bool CreateDirectoryAndGetError(const FilePath& full_path,
   }
 
   // Iterate through the parents and create the missing ones.
-  for (std::vector<FilePath>::reverse_iterator i = subpaths.rbegin();
-       i != subpaths.rend(); ++i) {
+  for (auto i = subpaths.rbegin(); i != subpaths.rend(); ++i) {
     if (DirectoryExists(*i))
       continue;
     if (mkdir(i->value().c_str(), 0700) == 0)
       continue;
     // Mkdir failed, but it might have failed with EEXIST, or some other error
-    // due to the the directory appearing out of thin air. This can occur if
+    // due to the directory appearing out of thin air. This can occur if
     // two processes are trying to create the same file system tree at the same
     // time. Check to see if it exists and make sure it is a directory.
     int saved_errno = errno;
@@ -731,6 +732,37 @@ bool CreateDirectoryAndGetError(const FilePath& full_path,
       return false;
     }
   }
+  return true;
+}
+
+// ReadFileToStringNonBlockingNonBlocking will read a file to a string. This
+// method should only be used on files which are known to be non-blocking such
+// as procfs or sysfs nodes. Additionally, the file is opened as O_NONBLOCK so
+// it WILL NOT block even if opened on a blocking file. It will return true if
+// the file read until EOF and it will return false otherwise, errno will remain
+// set on error conditions. |ret| will be populated with the contents of the
+// file.
+bool ReadFileToStringNonBlocking(const base::FilePath& file, std::string* ret) {
+  DCHECK(ret);
+  ret->clear();
+
+  base::ScopedFD fd(HANDLE_EINTR(
+      open(file.MaybeAsASCII().c_str(), O_CLOEXEC | O_NONBLOCK | O_RDONLY)));
+  if (!fd.is_valid()) {
+    return false;
+  }
+
+  ssize_t bytes_read = 0;
+  do {
+    char buf[4096];
+    bytes_read = HANDLE_EINTR(read(fd.get(), buf, sizeof(buf)));
+    if (bytes_read < 0) {
+      return false;
+    } else if (bytes_read > 0) {
+      ret->append(buf, bytes_read);
+    }
+  } while (bytes_read > 0);
+
   return true;
 }
 
@@ -754,7 +786,7 @@ bool IsLink(const FilePath& file_path) {
   stat_wrapper_t st;
   // If we can't lstat the file, it's safe to assume that the file won't at
   // least be a 'followable' link.
-  if (CallLstat(file_path.value().c_str(), &st) != 0)
+  if (File::Lstat(file_path.value().c_str(), &st) != 0)
     return false;
   return S_ISLNK(st.st_mode);
 }
@@ -769,7 +801,7 @@ bool GetFileInfo(const FilePath& file_path, File::Info* results) {
     return file.GetInfo(results);
   } else {
 #endif  // defined(OS_ANDROID)
-    if (CallStat(file_path.value().c_str(), &file_info) != 0)
+    if (File::Stat(file_path.value().c_str(), &file_info) != 0)
       return false;
 #if defined(OS_ANDROID)
   }
@@ -786,9 +818,9 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
   DCHECK(
       strchr(mode, 'e') == nullptr ||
       (strchr(mode, ',') != nullptr && strchr(mode, 'e') > strchr(mode, ',')));
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   FILE* result = nullptr;
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   // macOS does not provide a mode character to set O_CLOEXEC; see
   // https://developer.apple.com/legacy/library/documentation/Darwin/Reference/ManPages/man3/fopen.3.html.
   const char* the_mode = mode;
@@ -799,7 +831,7 @@ FILE* OpenFile(const FilePath& filename, const char* mode) {
   do {
     result = fopen(filename.value().c_str(), the_mode);
   } while (!result && errno == EINTR);
-#if defined(OS_MACOSX)
+#if defined(OS_APPLE)
   // Mark the descriptor as close-on-exec.
   if (result)
     SetCloseOnExec(fileno(result));
@@ -815,10 +847,22 @@ FILE* FileToFILE(File file, const char* mode) {
     file.TakePlatformFile();
   return stream;
 }
+
+File FILEToFile(FILE* file_stream) {
+  if (!file_stream)
+    return File();
+
+  PlatformFile fd = fileno(file_stream);
+  DCHECK_NE(fd, -1);
+  ScopedPlatformFile other_fd(HANDLE_EINTR(dup(fd)));
+  if (!other_fd.is_valid())
+    return File(File::GetLastFileError());
+  return File(std::move(other_fd));
+}
 #endif  // !defined(OS_NACL)
 
 int ReadFile(const FilePath& filename, char* data, int max_size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   int fd = HANDLE_EINTR(open(filename.value().c_str(), O_RDONLY));
   if (fd < 0)
     return -1;
@@ -830,7 +874,7 @@ int ReadFile(const FilePath& filename, char* data, int max_size) {
 }
 
 int WriteFile(const FilePath& filename, const char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   int fd = HANDLE_EINTR(creat(filename.value().c_str(), 0666));
   if (fd < 0)
     return -1;
@@ -856,10 +900,82 @@ bool WriteFileDescriptor(const int fd, const char* data, int size) {
   return true;
 }
 
+bool AllocateFileRegion(File* file, int64_t offset, size_t size) {
+  DCHECK(file);
+
+  // Explicitly extend |file| to the maximum size. Zeros will fill the new
+  // space. It is assumed that the existing file is fully realized as
+  // otherwise the entire file would have to be read and possibly written.
+  const int64_t original_file_len = file->GetLength();
+  if (original_file_len < 0) {
+    DPLOG(ERROR) << "fstat " << file->GetPlatformFile();
+    return false;
+  }
+
+  // Increase the actual length of the file, if necessary. This can fail if
+  // the disk is full and the OS doesn't support sparse files.
+  const int64_t new_file_len = offset + size;
+  if (!file->SetLength(std::max(original_file_len, new_file_len))) {
+    DPLOG(ERROR) << "ftruncate " << file->GetPlatformFile();
+    return false;
+  }
+
+  // Realize the extent of the file so that it can't fail (and crash) later
+  // when trying to write to a memory page that can't be created. This can
+  // fail if the disk is full and the file is sparse.
+
+  // First try the more effective platform-specific way of allocating the disk
+  // space. It can fail because the filesystem doesn't support it. In that case,
+  // use the manual method below.
+
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  if (HANDLE_EINTR(fallocate(file->GetPlatformFile(), 0, offset, size)) != -1)
+    return true;
+  DPLOG(ERROR) << "fallocate";
+#elif defined(OS_APPLE)
+  // MacOS doesn't support fallocate even though their new APFS filesystem
+  // does support sparse files. It does, however, have the functionality
+  // available via fcntl.
+  // See also: https://openradar.appspot.com/32720223
+  fstore_t params = {F_ALLOCATEALL, F_PEOFPOSMODE, offset, size, 0};
+  if (fcntl(file->GetPlatformFile(), F_PREALLOCATE, &params) != -1)
+    return true;
+  DPLOG(ERROR) << "F_PREALLOCATE";
+#endif
+
+  // Manually realize the extended file by writing bytes to it at intervals.
+  int64_t block_size = 512;  // Start with something safe.
+  stat_wrapper_t statbuf;
+  if (File::Fstat(file->GetPlatformFile(), &statbuf) == 0 &&
+      statbuf.st_blksize > 0 && base::bits::IsPowerOfTwo(statbuf.st_blksize)) {
+    block_size = statbuf.st_blksize;
+  }
+
+  // Write starting at the next block boundary after the old file length.
+  const int64_t extension_start =
+      base::bits::AlignUp(original_file_len, block_size);
+  for (int64_t i = extension_start; i < new_file_len; i += block_size) {
+    char existing_byte;
+    if (HANDLE_EINTR(pread(file->GetPlatformFile(), &existing_byte, 1, i)) !=
+        1) {
+      return false;  // Can't read? Not viable.
+    }
+    if (existing_byte != 0) {
+      continue;  // Block has data so must already exist.
+    }
+    if (HANDLE_EINTR(pwrite(file->GetPlatformFile(), &existing_byte, 1, i)) !=
+        1) {
+      return false;  // Can't write? Not viable.
+    }
+  }
+
+  return true;
+}
+
 #if !defined(OS_NACL_NONSFI)
 
 bool AppendToFile(const FilePath& filename, const char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   bool ret = true;
   int fd = HANDLE_EINTR(open(filename.value().c_str(), O_WRONLY | O_APPEND));
   if (fd < 0) {
@@ -883,7 +999,7 @@ bool AppendToFile(const FilePath& filename, const char* data, int size) {
 
 bool GetCurrentDirectory(FilePath* dir) {
   // getcwd can return ENOENT, which implies it checks against the disk.
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
 
   char system_buffer[PATH_MAX] = "";
   if (!getcwd(system_buffer, sizeof(system_buffer))) {
@@ -895,7 +1011,7 @@ bool GetCurrentDirectory(FilePath* dir) {
 }
 
 bool SetCurrentDirectory(const FilePath& path) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   return chdir(path.value().c_str()) == 0;
 }
 
@@ -938,7 +1054,7 @@ bool VerifyPathControlledByUser(const FilePath& base,
   return true;
 }
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MAC)
 bool VerifyPathControlledByAdmin(const FilePath& path) {
   const unsigned kRootUid = 0;
   const FilePath kFileSystemRoot("/");
@@ -950,10 +1066,10 @@ bool VerifyPathControlledByAdmin(const FilePath& path) {
   };
 
   // Reading the groups database may touch the file system.
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
 
   std::set<gid_t> allowed_group_ids;
-  for (int i = 0, ie = arraysize(kAdminGroupNames); i < ie; ++i) {
+  for (int i = 0, ie = base::size(kAdminGroupNames); i < ie; ++i) {
     struct group *group_record = getgrnam(kAdminGroupNames[i]);
     if (!group_record) {
       DPLOG(ERROR) << "Could not get the group ID of group \""
@@ -967,7 +1083,7 @@ bool VerifyPathControlledByAdmin(const FilePath& path) {
   return VerifyPathControlledByUser(
       kFileSystemRoot, path, kRootUid, allowed_group_ids);
 }
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+#endif  // defined(OS_MAC)
 
 int GetMaximumPathComponentLength(const FilePath& path) {
 #if defined(OS_FUCHSIA)
@@ -975,7 +1091,7 @@ int GetMaximumPathComponentLength(const FilePath& path) {
   // enough to guard against e.g. bugs causing multi-megabyte paths.
   return 1024;
 #else
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   return pathconf(path.value().c_str(), _PC_NAME_MAX);
 #endif
 }
@@ -983,9 +1099,9 @@ int GetMaximumPathComponentLength(const FilePath& path) {
 #if !defined(OS_ANDROID)
 // This is implemented in file_util_android.cc for that platform.
 bool GetShmemTempDir(bool executable, FilePath* path) {
-#if defined(OS_LINUX) || defined(OS_AIX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
   bool disable_dev_shm = false;
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_CHROMEOS_LACROS)
   disable_dev_shm = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableDevShmUsage);
 #endif
@@ -999,15 +1115,15 @@ bool GetShmemTempDir(bool executable, FilePath* path) {
     *path = FilePath("/dev/shm");
     return true;
   }
-#endif  // defined(OS_LINUX) || defined(OS_AIX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
   return GetTempDir(path);
 }
 #endif  // !defined(OS_ANDROID)
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_APPLE)
 // Mac has its own implementation, this is for all other Posix systems.
 bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   File infile;
 #if defined(OS_ANDROID)
   if (from_path.IsContentUri()) {
@@ -1025,22 +1141,70 @@ bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
   if (!outfile.IsValid())
     return false;
 
-  return CopyFileContents(&infile, &outfile);
+  return CopyFileContents(infile, outfile);
 }
-#endif  // !defined(OS_MACOSX)
+#endif  // !defined(OS_APPLE)
+
+PrefetchResult PreReadFile(const FilePath& file_path,
+                           bool is_executable,
+                           int64_t max_bytes) {
+  DCHECK_GE(max_bytes, 0);
+
+  // posix_fadvise() is only available in the Android NDK in API 21+. Older
+  // versions may have the required kernel support, but don't have enough usage
+  // to justify backporting.
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || \
+    (defined(OS_ANDROID) && __ANDROID_API__ >= 21)
+  File file(file_path, File::FLAG_OPEN | File::FLAG_READ);
+  if (!file.IsValid())
+    return PrefetchResult{PrefetchResultCode::kInvalidFile};
+
+  if (max_bytes == 0) {
+    // fadvise() pre-fetches the entire file when given a zero length.
+    return PrefetchResult{PrefetchResultCode::kSuccess};
+  }
+
+  const PlatformFile fd = file.GetPlatformFile();
+  const ::off_t len = base::saturated_cast<::off_t>(max_bytes);
+  return posix_fadvise(fd, /*offset=*/0, len, POSIX_FADV_WILLNEED) == 0
+             ? PrefetchResult{PrefetchResultCode::kSuccess}
+             : PrefetchResult{PrefetchResultCode::kFastFailed};
+#elif defined(OS_APPLE)
+  File file(file_path, File::FLAG_OPEN | File::FLAG_READ);
+  if (!file.IsValid())
+    return PrefetchResult{PrefetchResultCode::kInvalidFile};
+
+  if (max_bytes == 0) {
+    // fcntl(F_RDADVISE) fails when given a zero length.
+    return PrefetchResult{PrefetchResultCode::kSuccess};
+  }
+
+  const PlatformFile fd = file.GetPlatformFile();
+  ::radvisory read_advise_data = {
+      .ra_offset = 0, .ra_count = base::saturated_cast<int>(max_bytes)};
+  return fcntl(fd, F_RDADVISE, &read_advise_data) != -1
+             ? PrefetchResult{PrefetchResultCode::kSuccess}
+             : PrefetchResult{PrefetchResultCode::kFastFailed};
+#else
+  return internal::PreReadFileSlow(file_path, max_bytes)
+             ? PrefetchResult{PrefetchResultCode::kSlowSuccess}
+             : PrefetchResult{PrefetchResultCode::kSlowFailed};
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || (defined(OS_ANDROID) &&
+        // __ANDROID_API__ >= 21)
+}
 
 // -----------------------------------------------------------------------------
 
 namespace internal {
 
 bool MoveUnsafe(const FilePath& from_path, const FilePath& to_path) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   // Windows compatibility: if |to_path| exists, |from_path| and |to_path|
   // must be the same type, either both files, or both directories.
   stat_wrapper_t to_file_info;
-  if (CallStat(to_path.value().c_str(), &to_file_info) == 0) {
+  if (File::Stat(to_path.value().c_str(), &to_file_info) == 0) {
     stat_wrapper_t from_file_info;
-    if (CallStat(from_path.value().c_str(), &from_file_info) != 0)
+    if (File::Stat(from_path.value().c_str(), &from_file_info) != 0)
       return false;
     if (S_ISDIR(to_file_info.st_mode) != S_ISDIR(from_file_info.st_mode))
       return false;
@@ -1052,7 +1216,7 @@ bool MoveUnsafe(const FilePath& from_path, const FilePath& to_path) {
   if (!CopyDirectory(from_path, to_path, true))
     return false;
 
-  DeleteFile(from_path, true);
+  DeletePathRecursively(from_path);
   return true;
 }
 
@@ -1060,27 +1224,27 @@ bool MoveUnsafe(const FilePath& from_path, const FilePath& to_path) {
 
 #endif  // !defined(OS_NACL_NONSFI)
 
-#if defined(OS_LINUX) || defined(OS_AIX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
 BASE_EXPORT bool IsPathExecutable(const FilePath& path) {
   bool result = false;
   FilePath tmp_file_path;
 
-  ScopedFD fd(CreateAndOpenFdForTemporaryFileInDir(path, &tmp_file_path));
+  ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(path, &tmp_file_path);
   if (fd.is_valid()) {
-    DeleteFile(tmp_file_path, false);
+    DeleteFile(tmp_file_path);
     long sysconf_result = sysconf(_SC_PAGESIZE);
     CHECK_GE(sysconf_result, 0);
     size_t pagesize = static_cast<size_t>(sysconf_result);
     CHECK_GE(sizeof(pagesize), sizeof(sysconf_result));
     void* mapping = mmap(nullptr, pagesize, PROT_READ, MAP_SHARED, fd.get(), 0);
     if (mapping != MAP_FAILED) {
-      if (mprotect(mapping, pagesize, PROT_READ | PROT_EXEC) == 0)
+      if (HANDLE_EINTR(mprotect(mapping, pagesize, PROT_READ | PROT_EXEC)) == 0)
         result = true;
       munmap(mapping, pagesize);
     }
   }
   return result;
 }
-#endif  // defined(OS_LINUX) || defined(OS_AIX)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
 
 }  // namespace base

@@ -12,6 +12,8 @@
 #include "base/cfi_buildflags.h"
 #include "base/debug/asan_invalid_access.h"
 #include "base/debug/profiler.h"
+#include "base/logging.h"
+#include "base/sanitizer_buildflags.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
@@ -26,12 +28,11 @@ const base::subtle::Atomic32 kMagicValue = 42;
 // Helper for memory accesses that can potentially corrupt memory or cause a
 // crash during a native run.
 #if defined(ADDRESS_SANITIZER)
-#if defined(OS_IOS)
-// EXPECT_DEATH is not supported on IOS.
-#define HARMFUL_ACCESS(action,error_regexp) do { action; } while (0)
-#else
-#define HARMFUL_ACCESS(action,error_regexp) EXPECT_DEATH(action,error_regexp)
-#endif  // !OS_IOS
+#define HARMFUL_ACCESS(action, error_regexp) \
+  EXPECT_DEATH_IF_SUPPORTED(action, error_regexp)
+#elif BUILDFLAG(IS_HWASAN)
+#define HARMFUL_ACCESS(action, error_regexp) \
+  EXPECT_DEATH(action, "tag-mismatch")
 #else
 #define HARMFUL_ACCESS(action, error_regexp)
 #define HARMFUL_ACCESS_IS_NOOP
@@ -100,16 +101,6 @@ TEST(ToolsSanityTest, MemoryLeak) {
   leak[4] = 1;  // Make sure the allocated memory is used.
 }
 
-#if (defined(ADDRESS_SANITIZER) && defined(OS_IOS))
-// Because iOS doesn't support death tests, each of the following tests will
-// crash the whole program under Asan.
-#define MAYBE_AccessesToNewMemory DISABLED_AccessesToNewMemory
-#define MAYBE_AccessesToMallocMemory DISABLED_AccessesToMallocMemory
-#else
-#define MAYBE_AccessesToNewMemory AccessesToNewMemory
-#define MAYBE_AccessesToMallocMemory AccessesToMallocMemory
-#endif  // (defined(ADDRESS_SANITIZER) && defined(OS_IOS))
-
 // The following tests pass with Clang r170392, but not r172454, which
 // makes AddressSanitizer detect errors in them. We disable these tests under
 // AddressSanitizer until we fully switch to Clang r172454. After that the
@@ -125,20 +116,34 @@ TEST(ToolsSanityTest, MemoryLeak) {
 #define MAYBE_SingleElementDeletedWithBraces SingleElementDeletedWithBraces
 #endif  // defined(ADDRESS_SANITIZER)
 
-TEST(ToolsSanityTest, MAYBE_AccessesToNewMemory) {
-  char *foo = new char[10];
-  MakeSomeErrors(foo, 10);
+TEST(ToolsSanityTest, AccessesToNewMemory) {
+  char* foo = new char[16];
+  MakeSomeErrors(foo, 16);
   delete [] foo;
   // Use after delete.
   HARMFUL_ACCESS(foo[5] = 0, "heap-use-after-free");
 }
 
-TEST(ToolsSanityTest, MAYBE_AccessesToMallocMemory) {
-  char *foo = reinterpret_cast<char*>(malloc(10));
-  MakeSomeErrors(foo, 10);
+TEST(ToolsSanityTest, AccessesToMallocMemory) {
+  char* foo = reinterpret_cast<char*>(malloc(16));
+  MakeSomeErrors(foo, 16);
   free(foo);
   // Use after free.
   HARMFUL_ACCESS(foo[5] = 0, "heap-use-after-free");
+}
+
+TEST(ToolsSanityTest, AccessesToStack) {
+  char foo[16];
+
+  ReadUninitializedValue(foo);
+  HARMFUL_ACCESS(ReadValueOutOfArrayBoundsLeft(foo),
+                 "underflows this variable");
+  HARMFUL_ACCESS(ReadValueOutOfArrayBoundsRight(foo, 16),
+                 "overflows this variable");
+  HARMFUL_ACCESS(WriteValueOutOfArrayBoundsLeft(foo),
+                 "underflows this variable");
+  HARMFUL_ACCESS(WriteValueOutOfArrayBoundsRight(foo, 16),
+                 "overflows this variable");
 }
 
 #if defined(ADDRESS_SANITIZER)
@@ -172,8 +177,6 @@ TEST(ToolsSanityTest, MAYBE_SingleElementDeletedWithBraces) {
   delete [] foo;
 }
 #endif
-
-#if defined(ADDRESS_SANITIZER)
 
 TEST(ToolsSanityTest, DISABLED_AddressSanitizerNullDerefCrashTest) {
   // Intentionally crash to make sure AddressSanitizer is running.
@@ -233,8 +236,6 @@ TEST(ToolsSanityTest, DISABLED_AsanCorruptHeap) {
 }
 #endif  // OS_WIN
 #endif  // !HARMFUL_ACCESS_IS_NOOP
-
-#endif  // ADDRESS_SANITIZER
 
 namespace {
 

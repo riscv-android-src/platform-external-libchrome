@@ -21,8 +21,8 @@ void* GetPC() {
 TEST(CFIBacktraceAndroidTest, TestUnwinding) {
   auto* unwinder = CFIBacktraceAndroid::GetInitializedInstance();
   EXPECT_TRUE(unwinder->can_unwind_stack_frames());
-  EXPECT_GT(unwinder->executable_start_addr_, 0u);
-  EXPECT_GT(unwinder->executable_end_addr_, unwinder->executable_start_addr_);
+  EXPECT_GT(unwinder->executable_start_addr(), 0u);
+  EXPECT_GT(unwinder->executable_end_addr(), unwinder->executable_start_addr());
   EXPECT_GT(unwinder->cfi_mmap_->length(), 0u);
 
   const size_t kMaxFrames = 100;
@@ -39,9 +39,9 @@ TEST(CFIBacktraceAndroidTest, TestUnwinding) {
 
   for (size_t i = 0; i < unwind_count; ++i) {
     EXPECT_GT(reinterpret_cast<uintptr_t>(frames[i]),
-              unwinder->executable_start_addr_);
+              unwinder->executable_start_addr());
     EXPECT_LT(reinterpret_cast<uintptr_t>(frames[i]),
-              unwinder->executable_end_addr_);
+              unwinder->executable_end_addr());
   }
 }
 
@@ -68,10 +68,10 @@ TEST(CFIBacktraceAndroidTest, DISABLED_TestFindCFIRow) {
   STACK CFI 2204 .cfa: sp 44 + .ra: .cfa -8 + ^ r4: .cfa -16 + ^
   */
   uint16_t input[] = {// UNW_INDEX size
-                      0x2A,
+                      0x07, 0x0,
 
                       // UNW_INDEX address column (4 byte rows).
-                      0x0, 0x1000, 0x0, 0x1502, 0x0, 0x2000, 0x0, 0x2024, 0x0,
+                      0x1000, 0x0, 0x1502, 0x0, 0x2000, 0x0, 0x2024, 0x0,
                       0x2126, 0x0, 0x2200, 0x0, 0x2212, 0x0,
 
                       // UNW_INDEX index column (2 byte rows).
@@ -88,7 +88,7 @@ TEST(CFIBacktraceAndroidTest, DISABLED_TestFindCFIRow) {
       WriteFile(temp_path, reinterpret_cast<char*>(input), sizeof(input)));
 
   unwinder->cfi_mmap_.reset(new MemoryMappedFile());
-  unwinder->cfi_mmap_->Initialize(temp_path);
+  ASSERT_TRUE(unwinder->cfi_mmap_->Initialize(temp_path));
   unwinder->ParseCFITables();
 
   CFIBacktraceAndroid::CFIRow cfi_row = {0};

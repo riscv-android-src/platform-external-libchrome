@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <memory>
 
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversion_utils.h"
 
@@ -28,9 +28,8 @@ void OffsetAdjuster::AdjustOffsets(const Adjustments& adjustments,
                                    std::vector<size_t>* offsets_for_adjustment,
                                    size_t limit) {
   DCHECK(offsets_for_adjustment);
-  for (std::vector<size_t>::iterator i(offsets_for_adjustment->begin());
-       i != offsets_for_adjustment->end(); ++i)
-    AdjustOffset(adjustments, &(*i), limit);
+  for (auto& i : *offsets_for_adjustment)
+    AdjustOffset(adjustments, &i, limit);
 }
 
 // static
@@ -41,15 +40,14 @@ void OffsetAdjuster::AdjustOffset(const Adjustments& adjustments,
   if (*offset == string16::npos)
     return;
   int adjustment = 0;
-  for (Adjustments::const_iterator i = adjustments.begin();
-       i != adjustments.end(); ++i) {
-    if (*offset <= i->original_offset)
+  for (const auto& i : adjustments) {
+    if (*offset <= i.original_offset)
       break;
-    if (*offset < (i->original_offset + i->original_length)) {
+    if (*offset < (i.original_offset + i.original_length)) {
       *offset = string16::npos;
       return;
     }
-    adjustment += static_cast<int>(i->original_length - i->output_length);
+    adjustment += static_cast<int>(i.original_length - i.output_length);
   }
   *offset -= adjustment;
 
@@ -63,9 +61,8 @@ void OffsetAdjuster::UnadjustOffsets(
     std::vector<size_t>* offsets_for_unadjustment) {
   if (!offsets_for_unadjustment || adjustments.empty())
     return;
-  for (std::vector<size_t>::iterator i(offsets_for_unadjustment->begin());
-       i != offsets_for_unadjustment->end(); ++i)
-    UnadjustOffset(adjustments, &(*i));
+  for (auto& i : *offsets_for_unadjustment)
+    UnadjustOffset(adjustments, &i);
 }
 
 // static
@@ -74,13 +71,11 @@ void OffsetAdjuster::UnadjustOffset(const Adjustments& adjustments,
   if (*offset == string16::npos)
     return;
   int adjustment = 0;
-  for (Adjustments::const_iterator i = adjustments.begin();
-       i != adjustments.end(); ++i) {
-    if (*offset + adjustment <= i->original_offset)
+  for (const auto& i : adjustments) {
+    if (*offset + adjustment <= i.original_offset)
       break;
-    adjustment += static_cast<int>(i->original_length - i->output_length);
-    if ((*offset + adjustment) <
-        (i->original_offset + i->original_length)) {
+    adjustment += static_cast<int>(i.original_length - i.output_length);
+    if ((*offset + adjustment) < (i.original_offset + i.original_length)) {
       *offset = string16::npos;
       return;
     }
@@ -92,19 +87,25 @@ void OffsetAdjuster::UnadjustOffset(const Adjustments& adjustments,
 void OffsetAdjuster::MergeSequentialAdjustments(
     const Adjustments& first_adjustments,
     Adjustments* adjustments_on_adjusted_string) {
-  Adjustments::iterator adjusted_iter = adjustments_on_adjusted_string->begin();
-  Adjustments::const_iterator first_iter = first_adjustments.begin();
+  auto adjusted_iter = adjustments_on_adjusted_string->begin();
+  auto first_iter = first_adjustments.begin();
   // Simultaneously iterate over all |adjustments_on_adjusted_string| and
-  // |first_adjustments|, adding adjustments to or correcting the adjustments
-  // in |adjustments_on_adjusted_string| as we go.  |shift| keeps track of the
-  // current number of characters collapsed by |first_adjustments| up to this
-  // point.  |currently_collapsing| keeps track of the number of characters
-  // collapsed by |first_adjustments| into the current |adjusted_iter|'s
-  // length.  These are characters that will change |shift| as soon as we're
-  // done processing the current |adjusted_iter|; they are not yet reflected in
-  // |shift|.
+  // |first_adjustments|, pushing adjustments at the end of
+  // |adjustments_builder| as we go.  |shift| keeps track of the current number
+  // of characters collapsed by |first_adjustments| up to this point.
+  // |currently_collapsing| keeps track of the number of characters collapsed by
+  // |first_adjustments| into the current |adjusted_iter|'s length.  These are
+  // characters that will change |shift| as soon as we're done processing the
+  // current |adjusted_iter|; they are not yet reflected in |shift|.
   size_t shift = 0;
   size_t currently_collapsing = 0;
+  // While we *could* update |adjustments_on_adjusted_string| in place by
+  // inserting new adjustments into the middle, we would be repeatedly calling
+  // |std::vector::insert|. That would cost O(n) time per insert, relative to
+  // distance from end of the string.  By instead allocating
+  // |adjustments_builder| and calling |std::vector::push_back|, we only pay
+  // amortized constant time per push. We are trading space for time.
+  Adjustments adjustments_builder;
   while (adjusted_iter != adjustments_on_adjusted_string->end()) {
     if ((first_iter == first_adjustments.end()) ||
         ((adjusted_iter->original_offset + shift +
@@ -117,6 +118,7 @@ void OffsetAdjuster::MergeSequentialAdjustments(
       adjusted_iter->original_offset += shift;
       shift += currently_collapsing;
       currently_collapsing = 0;
+      adjustments_builder.push_back(*adjusted_iter);
       ++adjusted_iter;
     } else if ((adjusted_iter->original_offset + shift) >
                first_iter->original_offset) {
@@ -132,15 +134,9 @@ void OffsetAdjuster::MergeSequentialAdjustments(
       DCHECK_LE(first_iter->original_offset + first_iter->output_length,
                 adjusted_iter->original_offset + shift);
 
-      // Add the |first_adjustment_iter| to the full set of adjustments while
-      // making sure |adjusted_iter| continues pointing to the same element.
-      // We do this by inserting the |first_adjustment_iter| right before
-      // |adjusted_iter|, then incrementing |adjusted_iter| so it points to
-      // the following element.
+      // Add the |first_iter| to the full set of adjustments.
       shift += first_iter->original_length - first_iter->output_length;
-      adjusted_iter = adjustments_on_adjusted_string->insert(
-          adjusted_iter, *first_iter);
-      ++adjusted_iter;
+      adjustments_builder.push_back(*first_iter);
       ++first_iter;
     } else {
       // The first adjustment adjusted something that then got further adjusted
@@ -173,10 +169,10 @@ void OffsetAdjuster::MergeSequentialAdjustments(
     // (Their offsets are already correct with respect to the original string.)
     // Append them all.
     DCHECK(adjusted_iter == adjustments_on_adjusted_string->end());
-    adjustments_on_adjusted_string->insert(
-        adjustments_on_adjusted_string->end(), first_iter,
-        first_adjustments.end());
+    adjustments_builder.insert(adjustments_builder.end(), first_iter,
+                               first_adjustments.end());
   }
+  *adjustments_on_adjusted_string = std::move(adjustments_builder);
 }
 
 // Converts the given source Unicode character type to the given destination

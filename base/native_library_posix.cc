@@ -8,9 +8,11 @@
 
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/threading/scoped_blocking_call.h"
 
 namespace base {
 
@@ -22,7 +24,7 @@ NativeLibrary LoadNativeLibraryWithOptions(const FilePath& library_path,
                                            const NativeLibraryOptions& options,
                                            NativeLibraryLoadError* error) {
   // dlopen() opens the file off disk.
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
 
   // We deliberately do not use RTLD_DEEPBIND by default.  For the history why,
   // please refer to the bug tracker.  Some useful bug reports to read include:
@@ -60,7 +62,7 @@ void* GetFunctionPointerFromNativeLibrary(NativeLibrary library,
 
 std::string GetNativeLibraryName(StringPiece name) {
   DCHECK(IsStringASCII(name));
-  return "lib" + name.as_string() + ".so";
+  return StrCat({"lib", name, ".so"});
 }
 
 std::string GetLoadableModuleName(StringPiece name) {

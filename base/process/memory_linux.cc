@@ -15,33 +15,22 @@
 #include "base/logging.h"
 #include "base/process/internal_linux.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 
-#if defined(USE_TCMALLOC)
-#include "third_party/tcmalloc/gperftools-2.0/chromium/src/config.h"
-#include "third_party/tcmalloc/gperftools-2.0/chromium/src/gperftools/tcmalloc.h"
+#if BUILDFLAG(USE_TCMALLOC)
+#include "third_party/tcmalloc/chromium/src/config.h"
+#include "third_party/tcmalloc/chromium/src/gperftools/tcmalloc.h"
 #endif
-
-extern "C" {
-void* __libc_malloc(size_t size);
-}
 
 namespace base {
 
-size_t g_oom_size = 0U;
-
 namespace {
 
-void OnNoMemorySize(size_t size) {
-  g_oom_size = size;
-
-  if (size != 0)
-    LOG(FATAL) << "Out of memory, size = " << size;
-  LOG(FATAL) << "Out of memory.";
-}
-
-void OnNoMemory() {
-  OnNoMemorySize(0);
+void ReleaseReservationOrTerminate() {
+  if (internal::ReleaseAddressSpaceReservation())
+    return;
+  TerminateBecauseOutOfMemory(0);
 }
 
 }  // namespace
@@ -52,7 +41,7 @@ void EnableTerminationOnHeapCorruption() {
 
 void EnableTerminationOnOutOfMemory() {
   // Set the new-out of memory handler.
-  std::set_new_handler(&OnNoMemory);
+  std::set_new_handler(&ReleaseReservationOrTerminate);
   // If we're using glibc's allocator, the above functions will override
   // malloc and friends and make them die on out of memory.
 
@@ -64,19 +53,34 @@ void EnableTerminationOnOutOfMemory() {
 #endif
 }
 
-// NOTE: This is not the only version of this function in the source:
-// the setuid sandbox (in process_util_linux.c, in the sandbox source)
-// also has its own C version.
-bool AdjustOOMScore(ProcessId process, int score) {
+// ScopedAllowBlocking() has private constructor and it can only be used in
+// friend classes/functions. Declaring a class is easier in this situation to
+// avoid adding more dependency to thread_restrictions.h because of the
+// parameter used in AdjustOOMScore(). Specifically, ProcessId is a typedef
+// and we'll need to include another header file in thread_restrictions.h
+// without the class.
+class AdjustOOMScoreHelper {
+ public:
+  static bool AdjustOOMScore(ProcessId process, int score);
+
+ private:
+  DISALLOW_IMPLICIT_CONSTRUCTORS(AdjustOOMScoreHelper);
+};
+
+// static.
+bool AdjustOOMScoreHelper::AdjustOOMScore(ProcessId process, int score) {
   if (score < 0 || score > kMaxOomScore)
     return false;
 
   FilePath oom_path(internal::GetProcPidDir(process));
 
+  // Temporarily allowing blocking since oom paths are pseudo-filesystem paths.
+  base::ScopedAllowBlocking allow_blocking;
+
   // Attempt to write the newer oom_score_adj file first.
   FilePath oom_file = oom_path.AppendASCII("oom_score_adj");
   if (PathExists(oom_file)) {
-    std::string score_str = IntToString(score);
+    std::string score_str = NumberToString(score);
     DVLOG(1) << "Adjusting oom_score_adj of " << process << " to "
              << score_str;
     int score_len = static_cast<int>(score_str.length());
@@ -92,7 +96,7 @@ bool AdjustOOMScore(ProcessId process, int score) {
     const int kMaxOldOomScore = 15;
 
     int converted_score = score * kMaxOldOomScore / kMaxOomScore;
-    std::string score_str = IntToString(converted_score);
+    std::string score_str = NumberToString(converted_score);
     DVLOG(1) << "Adjusting oom_adj of " << process << " to " << score_str;
     int score_len = static_cast<int>(score_str.length());
     return (score_len == WriteFile(oom_file, score_str.c_str(), score_len));
@@ -101,15 +105,22 @@ bool AdjustOOMScore(ProcessId process, int score) {
   return false;
 }
 
+// NOTE: This is not the only version of this function in the source:
+// the setuid sandbox (in process_util_linux.c, in the sandbox source)
+// also has its own C version.
+bool AdjustOOMScore(ProcessId process, int score) {
+  return AdjustOOMScoreHelper::AdjustOOMScore(process, score);
+}
+
 bool UncheckedMalloc(size_t size, void** result) {
 #if BUILDFLAG(USE_ALLOCATOR_SHIM)
   *result = allocator::UncheckedAlloc(size);
 #elif defined(MEMORY_TOOL_REPLACES_ALLOCATOR) || \
-    (!defined(LIBC_GLIBC) && !defined(USE_TCMALLOC))
+    (!defined(LIBC_GLIBC) && !BUILDFLAG(USE_TCMALLOC))
   *result = malloc(size);
-#elif defined(LIBC_GLIBC) && !defined(USE_TCMALLOC)
+#elif defined(LIBC_GLIBC) && !BUILDFLAG(USE_TCMALLOC)
   *result = __libc_malloc(size);
-#elif defined(USE_TCMALLOC)
+#elif BUILDFLAG(USE_TCMALLOC)
   *result = tc_malloc_skip_new_handler(size);
 #endif
   return *result != nullptr;

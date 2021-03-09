@@ -5,6 +5,7 @@
 #ifndef BASE_TEST_LAUNCHER_TEST_RESULT_H_
 #define BASE_TEST_LAUNCHER_TEST_RESULT_H_
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -12,12 +13,13 @@
 
 namespace base {
 
-// Structure contains result of a single EXPECT/ASSERT/SUCCESS.
+// Structure contains result of a single EXPECT/ASSERT/SUCCESS/SKIP.
 struct TestResultPart {
   enum Type {
     kSuccess,          // SUCCESS
     kNonFatalFailure,  // EXPECT
     kFatalFailure,     // ASSERT
+    kSkip,             // SKIP
   };
   Type type;
 
@@ -55,6 +57,7 @@ struct TestResult {
     TEST_CRASH,             // Test crashed (includes CHECK/DCHECK failures).
     TEST_SKIPPED,           // Test skipped (not run at all).
     TEST_EXCESSIVE_OUTPUT,  // Test exceeded output limit.
+    TEST_NOT_RUN,           // Test has not yet been run.
   };
 
   TestResult();
@@ -73,6 +76,10 @@ struct TestResult {
 
   // Returns the test case name (e.g. "A" for "A.B").
   std::string GetTestCaseName() const;
+
+  // Add link in the xml output.
+  // See more in gtest_links.h.
+  void AddLink(const std::string& name, const std::string& url);
 
   // Returns true if the test has completed (i.e. the test binary exited
   // normally, possibly with an exit code indicating failure, but didn't crash
@@ -97,6 +104,9 @@ struct TestResult {
 
   // Information about failed expectations.
   std::vector<TestResultPart> test_result_parts;
+
+  // The key is link name.
+  std::map<std::string, std::string> links;
 };
 
 }  // namespace base

@@ -6,9 +6,18 @@
 #define BASE_THREADING_SCOPED_BLOCKING_CALL_H
 
 #include "base/base_export.h"
-#include "base/logging.h"
+#include "base/callback_forward.h"
+#include "base/location.h"
+#include "base/strings/string_piece.h"
+#include "base/threading/scoped_blocking_call_internal.h"
 
 namespace base {
+
+// A "blocking call" refers to any call that causes the calling thread to wait
+// off-CPU. It includes but is not limited to calls that wait on synchronous
+// file I/O operations: read or write a file from disk, interact with a pipe or
+// a socket, rename or delete a file, enumerate files in a directory, etc.
+// Acquiring a low contention lock is not considered a blocking call.
 
 // BlockingType indicates the likelihood that a blocking call will actually
 // block.
@@ -20,25 +29,29 @@ enum class BlockingType {
   WILL_BLOCK
 };
 
-namespace internal {
-class BlockingObserver;
-}
-
-// This class must be instantiated in every scope where a blocking call is made.
-// CPU usage should be minimal within that scope. //base APIs that block
-// instantiate their own ScopedBlockingCall; it is not necessary to instantiate
-// another ScopedBlockingCall in the scope where these APIs are used.
+// This class must be instantiated in every scope where a blocking call is made
+// and serves as a precise annotation of the scope that may/will block for the
+// scheduler. When a ScopedBlockingCall is instantiated, it asserts that
+// blocking calls are allowed in its scope with a call to
+// base::AssertBlockingAllowed(). CPU usage should be minimal within that scope.
+// //base APIs that block instantiate their own ScopedBlockingCall; it is not
+// necessary to instantiate another ScopedBlockingCall in the scope where these
+// APIs are used. Nested ScopedBlockingCalls are supported (mostly a no-op
+// except for WILL_BLOCK nested within MAY_BLOCK which will result in immediate
+// WILL_BLOCK semantics).
 //
 // Good:
 //   Data data;
 //   {
-//     ScopedBlockingCall scoped_blocking_call(BlockingType::WILL_BLOCK);
+//     ScopedBlockingCall scoped_blocking_call(
+//         FROM_HERE, BlockingType::WILL_BLOCK);
 //     data = GetDataFromNetwork();
 //   }
 //   CPUIntensiveProcessing(data);
 //
 // Bad:
-//   ScopedBlockingCall scoped_blocking_call(BlockingType::WILL_BLOCK);
+//   ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+//       BlockingType::WILL_BLOCK);
 //   Data data = GetDataFromNetwork();
 //   CPUIntensiveProcessing(data);  // CPU usage within a ScopedBlockingCall.
 //
@@ -46,7 +59,8 @@ class BlockingObserver;
 //   Data a;
 //   Data b;
 //   {
-//     ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
+//     ScopedBlockingCall scoped_blocking_call(
+//         FROM_HERE, BlockingType::MAY_BLOCK);
 //     a = GetDataFromMemoryCacheOrNetwork();
 //     b = GetDataFromMemoryCacheOrNetwork();
 //   }
@@ -54,7 +68,8 @@ class BlockingObserver;
 //   CPUIntensiveProcessing(b);
 //
 // Bad:
-//   ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
+//   ScopedBlockingCall scoped_blocking_call(
+//       FROM_HERE, BlockingType::MAY_BLOCK);
 //   Data a = GetDataFromMemoryCacheOrNetwork();
 //   Data b = GetDataFromMemoryCacheOrNetwork();
 //   CPUIntensiveProcessing(a);  // CPU usage within a ScopedBlockingCall.
@@ -66,74 +81,49 @@ class BlockingObserver;
 //
 // Bad:
 //  base::WaitableEvent waitable_event(...);
-//  ScopedBlockingCall scoped_blocking_call(BlockingType::WILL_BLOCK);
+//  ScopedBlockingCall scoped_blocking_call(
+//      FROM_HERE, BlockingType::WILL_BLOCK);
 //  waitable_event.Wait();  // Wait() instantiates its own ScopedBlockingCall.
 //
-// When a ScopedBlockingCall is instantiated from a TaskScheduler parallel or
+// When a ScopedBlockingCall is instantiated from a ThreadPool parallel or
 // sequenced task, the thread pool size is incremented to compensate for the
 // blocked thread (more or less aggressively depending on BlockingType).
-class BASE_EXPORT ScopedBlockingCall {
+class BASE_EXPORT ScopedBlockingCall
+    : public internal::UncheckedScopedBlockingCall {
  public:
-  ScopedBlockingCall(BlockingType blocking_type);
+  ScopedBlockingCall(const Location& from_here, BlockingType blocking_type);
   ~ScopedBlockingCall();
-
- private:
-  internal::BlockingObserver* const blocking_observer_;
-
-  // Previous ScopedBlockingCall instantiated on this thread.
-  ScopedBlockingCall* const previous_scoped_blocking_call_;
-
-  // Whether the BlockingType of the current thread was WILL_BLOCK after this
-  // ScopedBlockingCall was instantiated.
-  const bool is_will_block_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedBlockingCall);
 };
 
+// Usage reserved for //base callers.
 namespace internal {
 
-// Interface for an observer to be informed when a thread enters or exits
-// the scope of ScopedBlockingCall objects.
-class BASE_EXPORT BlockingObserver {
+// This class must be instantiated in every scope where a sync primitive is
+// used. When a ScopedBlockingCallWithBaseSyncPrimitives is instantiated, it
+// asserts that sync primitives are allowed in its scope with a call to
+// internal::AssertBaseSyncPrimitivesAllowed(). The same guidelines as for
+// ScopedBlockingCall should be followed.
+class BASE_EXPORT ScopedBlockingCallWithBaseSyncPrimitives
+    : public UncheckedScopedBlockingCall {
  public:
-  virtual ~BlockingObserver() = default;
-
-  // Invoked when a ScopedBlockingCall is instantiated on the observed thread
-  // where there wasn't an existing ScopedBlockingCall.
-  virtual void BlockingStarted(BlockingType blocking_type) = 0;
-
-  // Invoked when a WILL_BLOCK ScopedBlockingCall is instantiated on the
-  // observed thread where there was a MAY_BLOCK ScopedBlockingCall but not a
-  // WILL_BLOCK ScopedBlockingCall.
-  virtual void BlockingTypeUpgraded() = 0;
-
-  // Invoked when the last ScopedBlockingCall on the observed thread is
-  // destroyed.
-  virtual void BlockingEnded() = 0;
-};
-
-// Registers |blocking_observer| on the current thread. It is invalid to call
-// this on a thread where there is an active ScopedBlockingCall.
-BASE_EXPORT void SetBlockingObserverForCurrentThread(
-    BlockingObserver* blocking_observer);
-
-BASE_EXPORT void ClearBlockingObserverForTesting();
-
-// Unregisters the |blocking_observer| on the current thread within its scope.
-// Used in TaskScheduler tests to prevent calls to //base sync primitives from
-// affecting the thread pool capacity.
-class BASE_EXPORT ScopedClearBlockingObserverForTesting {
- public:
-  ScopedClearBlockingObserverForTesting();
-  ~ScopedClearBlockingObserverForTesting();
-
- private:
-  BlockingObserver* const blocking_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedClearBlockingObserverForTesting);
+  ScopedBlockingCallWithBaseSyncPrimitives(const Location& from_here,
+                                           BlockingType blocking_type);
+  ~ScopedBlockingCallWithBaseSyncPrimitives();
 };
 
 }  // namespace internal
+
+using IOJankReportingCallback =
+    RepeatingCallback<void(int janky_intervals_per_minute,
+                           int total_janks_per_minute)>;
+// Enables IO jank monitoring and reporting for this process. Should be called
+// at most once per process and only if
+// base::TimeTicks::IsConsistentAcrossProcesses() (the algorithm is unsafe
+// otherwise). |reporting_callback| will be invoked each time a monitoring
+// window completes, see internal::~IOJankMonitoringWindow() for details (must
+// be thread-safe).
+void BASE_EXPORT
+EnableIOJankMonitoringForProcess(IOJankReportingCallback reporting_callback);
 
 }  // namespace base
 

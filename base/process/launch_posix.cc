@@ -35,21 +35,24 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/process/environment_internal.h"
 #include "base/process/process.h"
 #include "base/process/process_metrics.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/threading/platform_thread_internal_posix.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/time/time.h"
-#include "base/trace_event/trace_event.h"
+#include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
-#if defined(OS_LINUX) || defined(OS_AIX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
 #include <sys/prctl.h>
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 #include <sys/ioctl.h>
 #endif
 
@@ -58,51 +61,28 @@
 #include <sys/ucontext.h>
 #endif
 
-#if defined(OS_MACOSX)
-#include <crt_externs.h>
-#include <sys/event.h>
-
-#include "base/feature_list.h"
-#else
-extern char** environ;
+#if defined(OS_APPLE)
+#error "macOS should use launch_mac.cc"
 #endif
 
-namespace base {
+extern char** environ;
 
-// Friend and derived class of ScopedAllowBaseSyncPrimitives which allows
-// GetAppOutputInternal() to join a process. GetAppOutputInternal() can't itself
-// be a friend of ScopedAllowBaseSyncPrimitives because it is in the anonymous
-// namespace.
-class GetAppOutputScopedAllowBaseSyncPrimitives
-    : public base::ScopedAllowBaseSyncPrimitives {};
+namespace base {
 
 #if !defined(OS_NACL_NONSFI)
 
 namespace {
 
-#if defined(OS_MACOSX)
-const Feature kMacLaunchProcessPosixSpawn{"MacLaunchProcessPosixSpawn",
-                                          FEATURE_ENABLED_BY_DEFAULT};
-#endif
-
 // Get the process's "environment" (i.e. the thing that setenv/getenv
 // work with).
 char** GetEnvironment() {
-#if defined(OS_MACOSX)
-  return *_NSGetEnviron();
-#else
   return environ;
-#endif
 }
 
 // Set the process's "environment" (i.e. the thing that setenv/getenv
 // work with).
 void SetEnvironment(char** env) {
-#if defined(OS_MACOSX)
-  *_NSGetEnviron() = env;
-#else
   environ = env;
-#endif
 }
 
 // Set the calling thread's signal mask to new_sigmask and return
@@ -121,7 +101,7 @@ sigset_t SetSignalMask(const sigset_t& new_sigmask) {
   return old_sigmask;
 }
 
-#if (!defined(OS_LINUX) && !defined(OS_AIX)) || \
+#if (!defined(OS_LINUX) && !defined(OS_AIX) && !defined(OS_CHROMEOS)) || \
     (!defined(__i386__) && !defined(__x86_64__) && !defined(__arm__))
 void ResetChildSignalHandlersToDefaults() {
   // The previous signal handlers are likely to be meaningless in the child's
@@ -219,10 +199,8 @@ struct ScopedDIRClose {
 // Automatically closes |DIR*|s.
 typedef std::unique_ptr<DIR, ScopedDIRClose> ScopedDIR;
 
-#if defined(OS_LINUX) || defined(OS_AIX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
 static const char kFDDir[] = "/proc/self/fd";
-#elif defined(OS_MACOSX)
-static const char kFDDir[] = "/dev/fd";
 #elif defined(OS_SOLARIS)
 static const char kFDDir[] = "/dev/fd";
 #elif defined(OS_FREEBSD)
@@ -301,14 +279,6 @@ Process LaunchProcess(const CommandLine& cmdline,
 Process LaunchProcess(const std::vector<std::string>& argv,
                       const LaunchOptions& options) {
   TRACE_EVENT0("base", "LaunchProcess");
-#if defined(OS_MACOSX)
-  if (FeatureList::IsEnabled(kMacLaunchProcessPosixSpawn)) {
-    // TODO(rsesek): Do this unconditionally. There is one user for each of
-    // these two options. https://crbug.com/179923.
-    if (!options.pre_exec_delegate && options.current_directory.empty())
-      return LaunchProcessPosixSpawn(argv, options);
-  }
-#endif
 
   InjectiveMultimap fd_shuffle1;
   InjectiveMultimap fd_shuffle2;
@@ -324,10 +294,10 @@ Process LaunchProcess(const std::vector<std::string>& argv,
   std::unique_ptr<char* []> new_environ;
   char* const empty_environ = nullptr;
   char* const* old_environ = GetEnvironment();
-  if (options.clear_environ)
+  if (options.clear_environment)
     old_environ = &empty_environ;
-  if (!options.environ.empty())
-    new_environ = AlterEnvironment(old_environ, options.environ);
+  if (!options.environment.empty())
+    new_environ = internal::AlterEnvironment(old_environ, options.environment);
 
   sigset_t full_sigset;
   sigfillset(&full_sigset);
@@ -340,7 +310,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
   pid_t pid;
   base::TimeTicks before_fork = TimeTicks::Now();
-#if defined(OS_LINUX) || defined(OS_AIX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
   if (options.clone_flags) {
     // Signal handling in this function assumes the creation of a new
     // process, so we check that a thread is not being created by mistake
@@ -376,7 +346,8 @@ Process LaunchProcess(const std::vector<std::string>& argv,
   if (pid < 0) {
     DPLOG(ERROR) << "fork";
     return Process();
-  } else if (pid == 0) {
+  }
+  if (pid == 0) {
     // Child process
 
     // DANGER: no calls to malloc or locks are allowed from now on:
@@ -414,8 +385,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
     if (options.maximize_rlimits) {
       // Some resource limits need to be maximal in this child.
-      for (size_t i = 0; i < options.maximize_rlimits->size(); ++i) {
-        const int resource = (*options.maximize_rlimits)[i];
+      for (auto resource : *options.maximize_rlimits) {
         struct rlimit limit;
         if (getrlimit(resource, &limit) < 0) {
           RAW_LOG(WARNING, "getrlimit failed");
@@ -428,10 +398,6 @@ Process LaunchProcess(const std::vector<std::string>& argv,
       }
     }
 
-#if defined(OS_MACOSX)
-    RestoreDefaultExceptionHandler();
-#endif  // defined(OS_MACOSX)
-
     ResetChildSignalHandlersToDefaults();
     SetSignalMask(orig_sigmask);
 
@@ -440,11 +406,11 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     // any hidden calls to malloc.
     void *malloc_thunk =
         reinterpret_cast<void*>(reinterpret_cast<intptr_t>(malloc) & ~4095);
-    mprotect(malloc_thunk, 4096, PROT_READ | PROT_WRITE | PROT_EXEC);
+    HANDLE_EINTR(mprotect(malloc_thunk, 4096, PROT_READ | PROT_WRITE | PROT_EXEC));
     memset(reinterpret_cast<void*>(malloc), 0xff, 8);
 #endif  // 0
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
     if (options.ctrl_terminal_fd >= 0) {
       // Set process' controlling terminal.
       if (HANDLE_EINTR(setsid()) != -1) {
@@ -456,9 +422,10 @@ Process LaunchProcess(const std::vector<std::string>& argv,
         RAW_LOG(WARNING, "setsid failed, ctrl terminal not set");
       }
     }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
     // Cannot use STL iterators here, since debug iterators use locks.
+    // NOLINTNEXTLINE(modernize-loop-convert)
     for (size_t i = 0; i < options.fds_to_remap.size(); ++i) {
       const FileHandleMappingVector::value_type& value =
           options.fds_to_remap[i];
@@ -466,7 +433,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
       fd_shuffle2.push_back(InjectionArc(value.first, value.second, false));
     }
 
-    if (!options.environ.empty() || options.clear_environ)
+    if (!options.environment.empty() || options.clear_environment)
       SetEnvironment(new_environ.get());
 
     // fd_shuffle1 is mutated by this call because it cannot malloc.
@@ -477,7 +444,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
     // Set NO_NEW_PRIVS by default. Since NO_NEW_PRIVS only exists in kernel
     // 3.5+, do not check the return value of prctl here.
-#if defined(OS_LINUX) || defined(OS_AIX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
 #ifndef PR_SET_NO_NEW_PRIVS
 #define PR_SET_NO_NEW_PRIVS 38
 #endif
@@ -517,7 +484,8 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     if (options.wait) {
       // While this isn't strictly disk IO, waiting for another process to
       // finish is the sort of thing ThreadRestrictions is trying to prevent.
-      base::AssertBlockingAllowed();
+      ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                              BlockingType::MAY_BLOCK);
       pid_t ret = HANDLE_EINTR(waitpid(pid, nullptr, 0));
       DPCHECK(ret > 0);
     }
@@ -548,7 +516,6 @@ static bool GetAppOutputInternal(
     std::string* output,
     bool do_search_path,
     int* exit_code) {
-  base::AssertBlockingAllowed();
   // exit_code must be supplied so calling function can determine success.
   DCHECK(exit_code);
   *exit_code = EXIT_FAILURE;
@@ -584,10 +551,6 @@ static bool GetAppOutputInternal(
       // DANGER: no calls to malloc or locks are allowed from now on:
       // http://crbug.com/36678
 
-#if defined(OS_MACOSX)
-      RestoreDefaultExceptionHandler();
-#endif
-
       // Obscure fork() rule: in the child, if you don't end up doing exec*(),
       // you call _exit() instead of exit(). This is because _exit() does not
       // call any previously-registered (in the parent) exit handlers, which
@@ -604,6 +567,8 @@ static bool GetAppOutputInternal(
       // Adding another element here? Remeber to increase the argument to
       // reserve(), above.
 
+      // Cannot use STL iterators here, since debug iterators use locks.
+      // NOLINTNEXTLINE(modernize-loop-convert)
       for (size_t i = 0; i < fd_shuffle1.size(); ++i)
         fd_shuffle2.push_back(fd_shuffle1[i]);
 
@@ -612,8 +577,10 @@ static bool GetAppOutputInternal(
 
       CloseSuperfluousFds(fd_shuffle2);
 
-      for (const auto& arg : argv)
-        argv_cstr.push_back(const_cast<char*>(arg.c_str()));
+      // Cannot use STL iterators here, since debug iterators use locks.
+      // NOLINTNEXTLINE(modernize-loop-convert)
+      for (size_t i = 0; i < argv.size(); ++i)
+        argv_cstr.push_back(const_cast<char*>(argv[i].c_str()));
       argv_cstr.push_back(nullptr);
 
       if (do_search_path)
@@ -630,6 +597,8 @@ static bool GetAppOutputInternal(
       // write to the pipe).
       close(pipe_fd[1]);
 
+      TRACE_EVENT0("base", "GetAppOutput");
+
       output->clear();
 
       while (true) {
@@ -645,9 +614,10 @@ static bool GetAppOutputInternal(
       // Always wait for exit code (even if we know we'll declare
       // GOT_MAX_OUTPUT).
       Process process(pid);
-      // A process launched with GetAppOutput*() usually doesn't wait on the
-      // process that launched it and thus chances of deadlock are low.
-      GetAppOutputScopedAllowBaseSyncPrimitives allow_base_sync_primitives;
+      // It is okay to allow this process to wait on the launched process as a
+      // process launched with GetAppOutput*() shouldn't wait back on the
+      // process that launched it.
+      internal::GetAppOutputScopedAllowBaseSyncPrimitives allow_wait;
       return process.WaitForExit(exit_code);
     }
   }
@@ -691,7 +661,8 @@ bool GetAppOutputWithExitCode(const CommandLine& cl,
 
 #endif  // !defined(OS_NACL_NONSFI)
 
-#if defined(OS_LINUX) || defined(OS_NACL_NONSFI) || defined(OS_AIX)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_NACL_NONSFI) || \
+    defined(OS_AIX)
 namespace {
 
 // This function runs on the stack specified on the clone call. It uses longjmp
@@ -757,8 +728,15 @@ pid_t ForkWithFlags(unsigned long flags, pid_t* ptid, pid_t* ctid) {
     return CloneAndLongjmpInChild(flags, ptid, ctid, &env);
   }
 
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  // Since we use clone() directly, it does not call any pthread_aftork()
+  // callbacks, we explicitly clear tid cache here (normally this call is
+  // done as pthread_aftork() callback).  See crbug.com/902514.
+  base::internal::ClearTidCache();
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+
   return 0;
 }
-#endif  // defined(OS_LINUX) || defined(OS_NACL_NONSFI)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_NACL_NONSFI)
 
 }  // namespace base

@@ -15,12 +15,13 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_types.h"
 #elif defined(OS_FUCHSIA)
 #include <zircon/types.h>
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
 #include <mach/mach_types.h>
 #elif defined(OS_POSIX)
 #include <pthread.h>
@@ -34,7 +35,7 @@ namespace base {
 typedef DWORD PlatformThreadId;
 #elif defined(OS_FUCHSIA)
 typedef zx_handle_t PlatformThreadId;
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
 typedef mach_port_t PlatformThreadId;
 #elif defined(OS_POSIX)
 typedef pid_t PlatformThreadId;
@@ -123,6 +124,12 @@ class BASE_EXPORT PlatformThread {
   // ThreadMain method will be called on the newly created thread.
   class BASE_EXPORT Delegate {
    public:
+    // The interval at which the thread expects to have work to do. Zero if
+    // unknown. (Example: audio buffer duration for real-time audio.) Is used to
+    // optimize the thread real-time behavior. Is called on the newly created
+    // thread before ThreadMain().
+    virtual TimeDelta GetRealtimePeriod();
+
     virtual void ThreadMain() = 0;
 
    protected:
@@ -145,7 +152,11 @@ class BASE_EXPORT PlatformThread {
   // Yield the current thread so another thread can be scheduled.
   static void YieldCurrentThread();
 
-  // Sleeps for the specified duration.
+  // Sleeps for the specified duration (real-time; ignores time overrides).
+  // Note: The sleep duration may be in base::Time or base::TimeTicks, depending
+  // on platform. If you're looking to use this in unit tests testing delayed
+  // tasks, this will be unreliable - instead, use
+  // base::test::TaskEnvironment with MOCK_TIME mode.
   static void Sleep(base::TimeDelta duration);
 
   // Sets the thread name visible to debuggers/tools. This will try to
@@ -196,9 +207,9 @@ class BASE_EXPORT PlatformThread {
   // and |thread_handle| is invalidated after this call.
   static void Detach(PlatformThreadHandle thread_handle);
 
-  // Returns true if SetCurrentThreadPriority() can be used to increase the
-  // priority of the current thread.
-  static bool CanIncreaseCurrentThreadPriority();
+  // Returns true if SetCurrentThreadPriority() should be able to increase the
+  // priority of a thread to |priority|.
+  static bool CanIncreaseThreadPriority(ThreadPriority priority);
 
   // Toggles the current thread's priority at runtime.
   //
@@ -217,7 +228,10 @@ class BASE_EXPORT PlatformThread {
 
   static ThreadPriority GetCurrentThreadPriority();
 
-#if defined(OS_LINUX)
+  // Returns a realtime period provided by |delegate|.
+  static TimeDelta GetRealtimePeriod(Delegate* delegate);
+
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
   // Toggles a specific thread's priority at runtime. This can be used to
   // change the priority of a thread in a different process and will fail
   // if the calling process does not have proper permissions. The
@@ -227,13 +241,46 @@ class BASE_EXPORT PlatformThread {
   // to change the priority of sandboxed threads for improved performance.
   // Warning: Don't use this for a main thread because that will change the
   // whole thread group's (i.e. process) priority.
-  static void SetThreadPriority(PlatformThreadId thread_id,
+  static void SetThreadPriority(PlatformThreadId process_id,
+                                PlatformThreadId thread_id,
                                 ThreadPriority priority);
 #endif
 
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+  // Signals that the feature list has been initialized which allows to check
+  // the feature's value now and initialize state. This prevents race
+  // conditions where the feature is being checked while it is being
+  // initialized, which can cause a crash.
+  static void InitThreadPostFieldTrial();
+#endif
+
+  // Returns the default thread stack size set by chrome. If we do not
+  // explicitly set default size then returns 0.
+  static size_t GetDefaultThreadStackSize();
+
+#if defined(OS_APPLE)
+  // Initializes realtime threading based on kOptimizedRealtimeThreadingMac
+  // feature status.
+  static void InitializeOptimizedRealtimeThreadingFeature();
+
+  // Stores the period value in TLS.
+  static void SetCurrentThreadRealtimePeriodValue(TimeDelta realtime_period);
+#endif
+
  private:
+  static void SetCurrentThreadPriorityImpl(ThreadPriority priority);
+
   DISALLOW_IMPLICIT_CONSTRUCTORS(PlatformThread);
 };
+
+namespace internal {
+
+// Initializes the "ThreadPriorities" feature. The feature state is only taken
+// into account after this initialization. This initialization must be
+// synchronized with calls to PlatformThread::SetCurrentThreadPriority().
+void InitializeThreadPrioritiesFeature();
+
+}  // namespace internal
 
 }  // namespace base
 

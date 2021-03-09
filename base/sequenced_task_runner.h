@@ -131,14 +131,39 @@ class BASE_EXPORT SequencedTaskRunner : public TaskRunner {
     return DeleteSoon(from_here, object.release());
   }
 
-  // Submits a non-nestable task to release the given object.  Returns
-  // true if the object may be released at some point in the future,
-  // and false if the object definitely will not be released.
+  // Submits a non-nestable task to release the given object.
+  //
+  // ReleaseSoon makes sure that the object it the scoped_refptr points to gets
+  // properly released on the correct thread.
+  // We apply ReleaseSoon to the rvalue as the side-effects can be unclear to
+  // the caller if an lvalue is used. That being so, the scoped_refptr should
+  // always be std::move'd.
+  // Example use:
+  //
+  // scoped_refptr<T> foo_scoped_refptr;
+  // ...
+  // task_runner->ReleaseSoon(std::move(foo_scoped_refptr));
   template <class T>
-  bool ReleaseSoon(const Location& from_here, const T* object) {
-    return DeleteOrReleaseSoonInternal(from_here, &ReleaseHelper<T>::DoRelease,
-                                       object);
+  void ReleaseSoon(const Location& from_here, scoped_refptr<T>&& object) {
+    if (!object)
+      return;
+
+    DeleteOrReleaseSoonInternal(from_here, &ReleaseHelper<T>::DoRelease,
+                                object.release());
   }
+
+  // Returns true iff tasks posted to this TaskRunner are sequenced
+  // with this call.
+  //
+  // In particular:
+  // - Returns true if this is a SequencedTaskRunner to which the
+  //   current task was posted.
+  // - Returns true if this is a SequencedTaskRunner bound to the
+  //   same sequence as the SequencedTaskRunner to which the current
+  //   task was posted.
+  // - Returns true if this is a SingleThreadTaskRunner bound to
+  //   the current thread.
+  virtual bool RunsTasksInCurrentSequence() const = 0;
 
  protected:
   ~SequencedTaskRunner() override = default;

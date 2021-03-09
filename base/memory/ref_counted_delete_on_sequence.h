@@ -7,8 +7,8 @@
 
 #include <utility>
 
+#include "base/check.h"
 #include "base/location.h"
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner.h"
@@ -38,14 +38,14 @@ class RefCountedDeleteOnSequence : public subtle::RefCountedThreadSafeBase {
 
   // A SequencedTaskRunner for the current sequence can be acquired by calling
   // SequencedTaskRunnerHandle::Get().
-  RefCountedDeleteOnSequence(
+  explicit RefCountedDeleteOnSequence(
       scoped_refptr<SequencedTaskRunner> owning_task_runner)
       : subtle::RefCountedThreadSafeBase(T::kRefCountPreference),
         owning_task_runner_(std::move(owning_task_runner)) {
     DCHECK(owning_task_runner_);
   }
 
-  void AddRef() const { subtle::RefCountedThreadSafeBase::AddRef(); }
+  void AddRef() const { AddRefImpl(T::kRefCountPreference); }
 
   void Release() const {
     if (subtle::RefCountedThreadSafeBase::Release())
@@ -70,6 +70,14 @@ class RefCountedDeleteOnSequence : public subtle::RefCountedThreadSafeBase {
       delete t;
     else
       owning_task_runner_->DeleteSoon(FROM_HERE, t);
+  }
+
+  void AddRefImpl(subtle::StartRefCountFromZeroTag) const {
+    subtle::RefCountedThreadSafeBase::AddRef();
+  }
+
+  void AddRefImpl(subtle::StartRefCountFromOneTag) const {
+    subtle::RefCountedThreadSafeBase::AddRefWithCheck();
   }
 
   const scoped_refptr<SequencedTaskRunner> owning_task_runner_;

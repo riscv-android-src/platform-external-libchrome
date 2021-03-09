@@ -48,13 +48,28 @@ class TestResultsTracker {
   // Adds |test_name| to the set of disabled tests.
   void AddDisabledTest(const std::string& test_name);
 
-  // Adds location for the |test_name|.
+  // Adds location for the |test_name|. Locations are required for all tests run
+  // in a given shard, by both the TestLauncher and its delegate.
   void AddTestLocation(const std::string& test_name,
                        const std::string& file,
                        int line);
 
+  // Adds placeholder for the |test_name|. Placeholders are required for all
+  // tests that are expected to produce results in a given shard.
+  void AddTestPlaceholder(const std::string& test_name);
+
   // Adds |result| to the stored test results.
   void AddTestResult(const TestResult& result);
+
+  // Adds to the current iteration the fact that |count| items were leaked by
+  // one or more tests in |test_names| in its temporary directory.
+  void AddLeakedItems(int count, const std::vector<std::string>& test_names);
+
+  // Even when no iterations have occurred, we still want to generate output
+  // data with "NOTRUN" status for each test. This method generates a
+  // placeholder iteration. The first iteration will overwrite the data in the
+  // placeholder iteration.
+  void GeneratePlaceholderIteration();
 
   // Prints a summary of current test iteration to stdout.
   void PrintSummaryOfCurrentIteration() const;
@@ -84,12 +99,15 @@ class TestResultsTracker {
   TestStatusMap GetTestStatusMapForAllIterations() const;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(TestResultsTrackerTest,
+                           SaveSummaryAsJSONWithLinkInResult);
   void GetTestStatusForIteration(int iteration, TestStatusMap* map) const;
 
   template<typename InputIterator>
   void PrintTests(InputIterator first,
                   InputIterator last,
                   const std::string& description) const;
+  void PrintLeaks(int count, const std::vector<std::string>& test_names) const;
 
   struct AggregateTestResult {
     AggregateTestResult();
@@ -107,6 +125,9 @@ class TestResultsTracker {
     // Aggregate test results grouped by full test name.
     typedef std::map<std::string, AggregateTestResult> ResultsMap;
     ResultsMap results;
+
+    // A sequence of tests that leaked files/dirs in their temp directory.
+    std::vector<std::pair<int, std::vector<std::string>>> leaked_temp_items;
   };
 
   struct CodeLocation {
@@ -119,6 +140,9 @@ class TestResultsTracker {
 
   ThreadChecker thread_checker_;
 
+  // Print tests that leak files and/or directories in their temp dir.
+  bool print_temp_leaks_ = false;
+
   // Set of global tags, i.e. strings indicating conditions that apply to
   // the entire test run.
   std::set<std::string> global_tags_;
@@ -126,7 +150,11 @@ class TestResultsTracker {
   // Set of all test names discovered in the current executable.
   std::set<std::string> all_tests_;
 
+  // CodeLocation for all tests that will be run as a part of this shard.
   std::map<std::string, CodeLocation> test_locations_;
+
+  // Name of tests that will run and produce results.
+  std::set<std::string> test_placeholders_;
 
   // Set of all disabled tests in the current executable.
   std::set<std::string> disabled_tests_;

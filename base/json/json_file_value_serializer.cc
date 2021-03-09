@@ -4,9 +4,10 @@
 
 #include "base/json/json_file_value_serializer.h"
 
+#include "base/check.h"
 #include "base/files/file_util.h"
 #include "base/json/json_string_value_serializer.h"
-#include "base/logging.h"
+#include "base/notreached.h"
 #include "build/build_config.h"
 
 using base::FilePath;
@@ -54,12 +55,13 @@ bool JSONFileValueSerializer::SerializeInternal(const base::Value& root,
 JSONFileValueDeserializer::JSONFileValueDeserializer(
     const base::FilePath& json_file_path,
     int options)
-    : json_file_path_(json_file_path), options_(options), last_read_size_(0U) {}
+    : json_file_path_(json_file_path), options_(options) {}
 
 JSONFileValueDeserializer::~JSONFileValueDeserializer() = default;
 
 int JSONFileValueDeserializer::ReadFileToString(std::string* json_string) {
   DCHECK(json_string);
+  last_read_size_ = 0u;
   if (!base::ReadFileToString(json_file_path_, json_string)) {
 #if defined(OS_WIN)
     int error = ::GetLastError();
@@ -69,10 +71,8 @@ int JSONFileValueDeserializer::ReadFileToString(std::string* json_string) {
       return JSON_ACCESS_DENIED;
     }
 #endif
-    if (!base::PathExists(json_file_path_))
-      return JSON_NO_SUCH_FILE;
-    else
-      return JSON_CANNOT_READ_FILE;
+    return base::PathExists(json_file_path_) ? JSON_CANNOT_READ_FILE
+                                             : JSON_NO_SUCH_FILE;
   }
 
   last_read_size_ = json_string->size();

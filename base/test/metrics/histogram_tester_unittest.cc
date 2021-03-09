@@ -22,6 +22,7 @@ const char kHistogram2[] = "Test2";
 const char kHistogram3[] = "Test3";
 const char kHistogram4[] = "Test4";
 const char kHistogram5[] = "Test5";
+const char kHistogram6[] = "Test6";
 
 }  // namespace
 
@@ -71,6 +72,8 @@ TEST_F(HistogramTesterTest, TestUniqueSample) {
   UMA_HISTOGRAM_COUNTS_100(kHistogram2, 2);
 
   tester.ExpectUniqueSample(kHistogram2, 2, 3);
+  tester.ExpectUniqueTimeSample(kHistogram2,
+                                base::TimeDelta::FromMilliseconds(2), 3);
 }
 
 TEST_F(HistogramTesterTest, TestBucketsSample) {
@@ -130,7 +133,7 @@ TEST_F(HistogramTesterTest, TestGetTotalCountsForPrefix) {
 
 TEST_F(HistogramTesterTest, TestGetAllChangedHistograms) {
   // Record into a sample twice, once before the tester creation.
-  UMA_HISTOGRAM_COUNTS_100(kHistogram1, true);
+  UMA_HISTOGRAM_COUNTS_100(kHistogram6, true);
   UMA_HISTOGRAM_COUNTS_100(kHistogram4, 4);
 
   HistogramTester tester;
@@ -152,6 +155,20 @@ TEST_F(HistogramTesterTest, TestGetAllChangedHistograms) {
   EXPECT_NE(
       std::string::npos,
       results.find("Histogram: Test1.Test2.Test3 recorded 1 new samples"));
+}
+
+TEST_F(HistogramTesterTest, MissingHistogramMeansEmptyBuckets) {
+  // When a histogram hasn't been instantiated, expecting counts of zero should
+  // still succeed.
+  static const char kHistogram[] = "MissingHistogramMeansEmptyBucketsHistogram";
+  HistogramTester tester;
+
+  tester.ExpectBucketCount(kHistogram, 42, 0);
+  tester.ExpectTotalCount(kHistogram, 0);
+  EXPECT_TRUE(tester.GetAllSamples(kHistogram).empty());
+  EXPECT_EQ(0, tester.GetBucketCount(kHistogram, 42));
+  EXPECT_EQ(0,
+            tester.GetHistogramSamplesSinceCreation(kHistogram)->TotalCount());
 }
 
 }  // namespace base

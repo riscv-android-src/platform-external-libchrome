@@ -4,28 +4,46 @@
 
 #include "base/memory/weak_ptr.h"
 
+#if DCHECK_IS_ON()
+#include "base/debug/stack_trace.h"
+#endif
+
 namespace base {
 namespace internal {
 
-WeakReference::Flag::Flag() : is_valid_(true) {
+WeakReference::Flag::Flag() {
   // Flags only become bound when checked for validity, or invalidated,
   // so that we can check that later validity/invalidation operations on
   // the same Flag take place on the same sequenced thread.
-  sequence_checker_.DetachFromSequence();
+  DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
 void WeakReference::Flag::Invalidate() {
   // The flag being invalidated with a single ref implies that there are no
   // weak pointers in existence. Allow deletion on other thread in this case.
-  DCHECK(sequence_checker_.CalledOnValidSequence() || HasOneRef())
-      << "WeakPtrs must be invalidated on the same sequenced thread.";
-  is_valid_ = false;
+#if DCHECK_IS_ON()
+  std::unique_ptr<debug::StackTrace> bound_at;
+  DCHECK(sequence_checker_.CalledOnValidSequence(&bound_at) || HasOneRef())
+      << "WeakPtrs must be invalidated on the same sequenced thread as where "
+      << "they are bound.\n"
+      << (bound_at ? "This was bound at:\n" + bound_at->ToString() : "")
+      << "Check failed at:";
+#endif
+  invalidated_.Set();
 }
 
 bool WeakReference::Flag::IsValid() const {
-  DCHECK(sequence_checker_.CalledOnValidSequence())
-      << "WeakPtrs must be checked on the same sequenced thread.";
-  return is_valid_;
+  // WeakPtrs must be checked on the same sequenced thread.
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return !invalidated_.IsSet();
+}
+
+bool WeakReference::Flag::MaybeValid() const {
+  return !invalidated_.IsSet();
+}
+
+void WeakReference::Flag::DetachFromSequence() {
+  DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
 WeakReference::Flag::~Flag() = default;
@@ -36,33 +54,36 @@ WeakReference::WeakReference(const scoped_refptr<Flag>& flag) : flag_(flag) {}
 
 WeakReference::~WeakReference() = default;
 
-WeakReference::WeakReference(WeakReference&& other) = default;
+WeakReference::WeakReference(WeakReference&& other) noexcept = default;
 
 WeakReference::WeakReference(const WeakReference& other) = default;
 
-bool WeakReference::is_valid() const {
+bool WeakReference::IsValid() const {
   return flag_ && flag_->IsValid();
 }
 
-WeakReferenceOwner::WeakReferenceOwner() = default;
+bool WeakReference::MaybeValid() const {
+  return flag_ && flag_->MaybeValid();
+}
+
+WeakReferenceOwner::WeakReferenceOwner()
+    : flag_(MakeRefCounted<WeakReference::Flag>()) {}
 
 WeakReferenceOwner::~WeakReferenceOwner() {
-  Invalidate();
+  flag_->Invalidate();
 }
 
 WeakReference WeakReferenceOwner::GetRef() const {
-  // If we hold the last reference to the Flag then create a new one.
+  // If we hold the last reference to the Flag then detach the SequenceChecker.
   if (!HasRefs())
-    flag_ = new WeakReference::Flag();
+    flag_->DetachFromSequence();
 
   return WeakReference(flag_);
 }
 
 void WeakReferenceOwner::Invalidate() {
-  if (flag_) {
-    flag_->Invalidate();
-    flag_ = nullptr;
-  }
+  flag_->Invalidate();
+  flag_ = MakeRefCounted<WeakReference::Flag>();
 }
 
 WeakPtrBase::WeakPtrBase() : ptr_(0) {}

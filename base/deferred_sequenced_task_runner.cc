@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/logging.h"
+#include "base/check.h"
 
 namespace base {
 
@@ -26,9 +26,12 @@ DeferredSequencedTaskRunner::DeferredTask::operator=(DeferredTask&& other) =
 
 DeferredSequencedTaskRunner::DeferredSequencedTaskRunner(
     scoped_refptr<SequencedTaskRunner> target_task_runner)
-    : DeferredSequencedTaskRunner() {
-  DCHECK(target_task_runner);
-  target_task_runner_ = std::move(target_task_runner);
+    : created_thread_id_(PlatformThread::CurrentId()),
+      target_task_runner_(std::move(target_task_runner)) {
+#if DCHECK_IS_ON()
+  AutoLock lock(lock_);
+  DCHECK(target_task_runner_);
+#endif
 }
 
 DeferredSequencedTaskRunner::DeferredSequencedTaskRunner()
@@ -111,10 +114,7 @@ void DeferredSequencedTaskRunner::StartImpl() {
   DCHECK(!started_);
   started_ = true;
   DCHECK(target_task_runner_);
-  for (std::vector<DeferredTask>::iterator i = deferred_tasks_queue_.begin();
-      i != deferred_tasks_queue_.end();
-      ++i) {
-    DeferredTask& task = *i;
+  for (auto& task : deferred_tasks_queue_) {
     if (task.is_non_nestable) {
       target_task_runner_->PostNonNestableDelayedTask(
           task.posted_from, std::move(task.task), task.delay);

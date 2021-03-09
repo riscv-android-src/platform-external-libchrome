@@ -8,10 +8,12 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <utility>
 #include <vector>
 
+#include "base/check_op.h"
+#include "base/debug/alias.h"
 #include "base/gtest_prod_util.h"
-#include "base/logging.h"
 #include "base/time/time.h"
 
 namespace base {
@@ -32,7 +34,7 @@ namespace internal {
 // MaybeShrinkQueue to avoid unnecessary churn.
 //
 // NB this queue isn't by itself thread safe.
-template <typename T>
+template <typename T, TimeTicks (*now_source)() = TimeTicks::Now>
 class LazilyDeallocatedDeque {
  public:
   enum {
@@ -49,8 +51,9 @@ class LazilyDeallocatedDeque {
     kMinimumShrinkIntervalInSeconds = 5
   };
 
-  LazilyDeallocatedDeque() {}
-
+  LazilyDeallocatedDeque() = default;
+  LazilyDeallocatedDeque(const LazilyDeallocatedDeque&) = delete;
+  LazilyDeallocatedDeque& operator=(const LazilyDeallocatedDeque&) = delete;
   ~LazilyDeallocatedDeque() { clear(); }
 
   bool empty() const { return size_ == 0; }
@@ -79,12 +82,17 @@ class LazilyDeallocatedDeque {
   // Assumed to be an uncommon operation.
   void push_front(T t) {
     if (!head_) {
+      DCHECK(!tail_);
       head_ = std::make_unique<Ring>(kMinimumRingSize);
       tail_ = head_.get();
     }
 
     // Grow if needed, by the minimum amount.
     if (!head_->CanPush()) {
+      // TODO(alexclarke): Remove once we've understood the OOMs.
+      size_t size = size_;
+      base::debug::Alias(&size);
+
       std::unique_ptr<Ring> new_ring = std::make_unique<Ring>(kMinimumRingSize);
       new_ring->next_ = std::move(head_);
       head_ = std::move(new_ring);
@@ -97,13 +105,21 @@ class LazilyDeallocatedDeque {
   // Assumed to be a common operation.
   void push_back(T t) {
     if (!head_) {
+      DCHECK(!tail_);
       head_ = std::make_unique<Ring>(kMinimumRingSize);
       tail_ = head_.get();
     }
 
     // Grow if needed.
     if (!tail_->CanPush()) {
-      tail_->next_ = std::make_unique<Ring>(tail_->capacity() * 2);
+      // TODO(alexclarke): Remove once we've understood the OOMs.
+      size_t size = size_;
+      base::debug::Alias(&size);
+
+      // Doubling the size is a common strategy, but one which can be wasteful
+      // so we use a (somewhat) slower growth curve.
+      tail_->next_ = std::make_unique<Ring>(2 + tail_->capacity() +
+                                            (tail_->capacity() / 2));
       tail_ = tail_->next_.get();
     }
 
@@ -132,6 +148,8 @@ class LazilyDeallocatedDeque {
   }
 
   void pop_front() {
+    DCHECK(head_);
+    DCHECK(!head_->empty());
     DCHECK(tail_);
     DCHECK_GT(size_, 0u);
     head_->pop_front();
@@ -161,7 +179,7 @@ class LazilyDeallocatedDeque {
     DCHECK_GE(max_size_, size_);
 
     // Rate limit how often we shrink the queue because it's somewhat expensive.
-    TimeTicks current_time = TimeTicks::Now();
+    TimeTicks current_time = now_source();
     if (current_time < next_resize_time_)
       return;
 
@@ -174,8 +192,8 @@ class LazilyDeallocatedDeque {
     // reclaiming it next time.
     max_size_ = size_;
 
-    // Only realloc if the current capacity is sufficiently the observed maximum
-    // size for the previous period.
+    // Only realloc if the current capacity is sufficiently greater than the
+    // observed maximum size for the previous period.
     if (new_capacity + kReclaimThreshold >= capacity())
       return;
 
@@ -220,7 +238,8 @@ class LazilyDeallocatedDeque {
           next_(nullptr) {
       DCHECK_GE(capacity_, kMinimumRingSize);
     }
-
+    Ring(const Ring&) = delete;
+    Ring& operator=(const Ring&) = delete;
     ~Ring() {
       while (!empty()) {
         pop_front();
@@ -296,8 +315,6 @@ class LazilyDeallocatedDeque {
     size_t back_index_;
     T* data_;
     std::unique_ptr<Ring> next_;
-
-    DISALLOW_COPY_AND_ASSIGN(Ring);
   };
 
  public:
@@ -313,7 +330,7 @@ class LazilyDeallocatedDeque {
     Iterator& operator++() {
       if (index_ == ring_->back_index_) {
         ring_ = ring_->next_.get();
-        index_ = 0;
+        index_ = ring_ ? ring_->CircularIncrement(ring_->front_index_) : 0;
       } else {
         index_ = ring_->CircularIncrement(index_);
       }
@@ -353,8 +370,6 @@ class LazilyDeallocatedDeque {
   size_t size_ = 0;
   size_t max_size_ = 0;
   TimeTicks next_resize_time_;
-
-  DISALLOW_COPY_AND_ASSIGN(LazilyDeallocatedDeque);
 };
 
 }  // namespace internal

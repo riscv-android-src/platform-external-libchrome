@@ -28,6 +28,13 @@ ScopedHardwareBufferHandle ScopedHardwareBufferHandle::Adopt(
   return ScopedHardwareBufferHandle(buffer);
 }
 
+// static
+ScopedHardwareBufferHandle ScopedHardwareBufferHandle::Create(
+    AHardwareBuffer* buffer) {
+  AndroidHardwareBufferCompat::GetInstance().Acquire(buffer);
+  return ScopedHardwareBufferHandle(buffer);
+}
+
 ScopedHardwareBufferHandle& ScopedHardwareBufferHandle::operator=(
     ScopedHardwareBufferHandle&& other) {
   reset();
@@ -51,8 +58,8 @@ void ScopedHardwareBufferHandle::reset() {
 }
 
 AHardwareBuffer* ScopedHardwareBufferHandle::Take() {
-  AHardwareBuffer* buffer = nullptr;
-  std::swap(buffer, buffer_);
+  AHardwareBuffer* buffer = buffer_;
+  buffer_ = nullptr;
   return buffer;
 }
 

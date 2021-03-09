@@ -11,8 +11,8 @@ The public API is broken out into the following header files:
     functions for performing arithmetic and conversion operations that detect
     errors and boundary conditions (e.g. overflow, truncation, etc.).
 *   `clamped_math.h` contains the `ClampedNumeric` template class and
-    helper functions for performing fast, clamped (i.e. non-sticky saturating)
-    arithmetic operations and conversions.
+    helper functions for performing fast, clamped (i.e. [non-sticky](#notsticky)
+    saturating) arithmetic operations and conversions.
 *   `safe_conversions.h` contains the `StrictNumeric` template class and
     a collection of custom casting templates and helper functions for safely
     converting between a range of numeric types.
@@ -34,7 +34,7 @@ The conversion priority for `Numeric` type coercions is:
 The following covers the preferred style for the most common uses of this
 library. Please don't cargo-cult from anywhere else. 😉
 
-### Performing checked arithmetic conversions
+### Performing checked arithmetic type conversions
 
 The `checked_cast` template converts between arbitrary arithmetic types, and is
 used for cases where a conversion failure should result in program termination:
@@ -44,23 +44,38 @@ used for cases where a conversion failure should result in program termination:
 size_t buff_size = checked_cast<size_t>(signed_value);
 ```
 
-### Performing saturated (clamped) arithmetic conversions
+### Performing saturated (clamped) arithmetic type conversions
 
 The `saturated_cast` template converts between arbitrary arithmetic types, and
 is used in cases where an out-of-bounds source value should be saturated to the
 corresponding maximum or minimum of the destination type:
 
 ```cpp
+// Cast to a smaller type, saturating as needed.
+int8_t eight_bit_value = saturated_cast<int8_t>(int_value);
+
 // Convert from float with saturation to INT_MAX, INT_MIN, or 0 for NaN.
 int int_value = saturated_cast<int>(floating_point_value);
 ```
 
-### Enforcing arithmetic conversions at compile-time
+`ClampCeil`, `ClampFloor`, and `ClampRound` provide similar functionality to the
+versions in `std::`, but saturate and return an integral type.  An optional
+template parameter specifies the desired destination type (`int` if
+unspecified).  These should be used for most floating-to-integral conversions.
 
-The `strict_cast` enforces type restrictions at compile-time and results in
-emitted code that is identical to a normal `static_cast`. However, a
-`strict_cast` assignment will fail to compile if the destination type cannot
-represent the full range of the source type:
+```cpp
+// Basically saturated_cast<int>(std::round(floating_point_value)).
+int int_value = ClampRound(floating_point_value);
+
+// A destination type can be explicitly specified.
+uint8_t byte_value = ClampFloor<uint8_t>(floating_point_value);
+```
+
+### Enforcing arithmetic type conversions at compile-time
+
+The `strict_cast` emits code that is identical to `static_cast`. However,
+provides static checks that will cause a compilation failure if the
+destination type cannot represent the full range of the source type:
 
 ```cpp
 // Throw a compiler error if byte_value is changed to an out-of-range-type.
@@ -139,6 +154,7 @@ void Rect::Inset(int left, int top, int right, int bottom) {
 ```
 
 *** note
+<a name="notsticky"></a>
 The `ClampedNumeric` type is not "sticky", which means the saturation is not
 retained across individual operations. As such, one arithmetic operation may
 result in a saturated value, while the next operation may then "desaturate"
@@ -179,16 +195,25 @@ performing a range of conversions, assignments, and tests.
 
 ### Other helper and conversion functions
 
-*   `IsValueInRangeForNumericType<>()` - A convenience function that returns
-    true if the type supplied as the template parameter can represent the value
-    passed as an argument to the function.
+*   `ClampCeil<>()` - A convenience function that computes the ceil of its floating-
+    point arg, then saturates to the destination type (template parameter,
+    defaults to `int`).
+*   `ClampFloor<>()` - A convenience function that computes the floor of its
+    floating-point arg, then saturates to the destination type (template
+    parameter, defaults to `int`).
 *   `IsTypeInRangeForNumericType<>()` - A convenience function that evaluates
     entirely at compile-time and returns true if the destination type (first
     template parameter) can represent the full range of the source type
     (second template parameter).
+*   `IsValueInRangeForNumericType<>()` - A convenience function that returns
+    true if the type supplied as the template parameter can represent the value
+    passed as an argument to the function.
 *   `IsValueNegative()` - A convenience function that will accept any
     arithmetic type as an argument and will return whether the value is less
     than zero. Unsigned types always return false.
+*   `ClampRound<>()` - A convenience function that rounds its floating-point arg,
+    then saturates to the destination type (template parameter, defaults to
+    `int`).
 *   `SafeUnsignedAbs()` - Returns the absolute value of the supplied integer
     parameter as an unsigned result (thus avoiding an overflow if the value
     is the signed, two's complement minimum).
@@ -226,6 +251,23 @@ promotions
 ](http://en.cppreference.com/w/cpp/language/implicit_conversion#Numeric_promotions)
 with the two differences being that *there is no default promotion to int*
 and *bitwise logical operations always return an unsigned of the wider type.*
+
+### Example
+
+```
+#include "base/numerics/checked_math.h"
+...
+CheckedNumeric<uint32_t> variable = 0;
+variable++;
+variable--;
+if (variable.ValueOrDie() == 0)
+  // Fine, |variable| still within valid range.
+
+variable--;
+variable++;
+if (variable.ValueOrDie() == 0)  // Breakpoint or configured CheckHandler
+  // Does not happen as variable underflowed.
+```
 
 ### Members
 

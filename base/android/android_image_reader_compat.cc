@@ -9,6 +9,7 @@
 #include "base/android/build_info.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 
 #define LOAD_FUNCTION(lib, func)                            \
   do {                                                      \
@@ -33,9 +34,7 @@ bool AndroidImageReader::IsSupported() {
   return is_supported_;
 }
 
-AndroidImageReader::AndroidImageReader() {
-  is_supported_ = LoadFunctions();
-}
+AndroidImageReader::AndroidImageReader() : is_supported_(LoadFunctions()) {}
 
 bool AndroidImageReader::LoadFunctions() {
   // If the Chromium build requires __ANDROID_API__ >= 26 at some
@@ -44,9 +43,10 @@ bool AndroidImageReader::LoadFunctions() {
   // devices, this is unlikely to happen in the foreseeable future, so we use
   // dynamic loading.
 
-  // Functions are not present for android version older than OREO
+  // Functions are not present for android version older than OREO.
+  // Currently we want to enable AImageReader only for android P+ devices.
   if (base::android::BuildInfo::GetInstance()->sdk_int() <
-      base::android::SDK_VERSION_OREO) {
+      base::android::SDK_VERSION_P) {
     return false;
   }
 
@@ -61,11 +61,14 @@ bool AndroidImageReader::LoadFunctions() {
   LOAD_FUNCTION(libmediandk, AImage_getHardwareBuffer);
   LOAD_FUNCTION(libmediandk, AImage_getWidth);
   LOAD_FUNCTION(libmediandk, AImage_getHeight);
-  LOAD_FUNCTION(libmediandk, AImageReader_new);
+  LOAD_FUNCTION(libmediandk, AImage_getCropRect);
+  LOAD_FUNCTION(libmediandk, AImageReader_newWithUsage);
   LOAD_FUNCTION(libmediandk, AImageReader_setImageListener);
   LOAD_FUNCTION(libmediandk, AImageReader_delete);
+  LOAD_FUNCTION(libmediandk, AImageReader_getFormat);
   LOAD_FUNCTION(libmediandk, AImageReader_getWindow);
   LOAD_FUNCTION(libmediandk, AImageReader_acquireLatestImageAsync);
+  LOAD_FUNCTION(libmediandk, AImageReader_acquireNextImageAsync);
 
   void* libandroid = dlopen("libandroid.so", RTLD_NOW);
   if (libandroid == nullptr) {
@@ -102,12 +105,20 @@ media_status_t AndroidImageReader::AImage_getHeight(const AImage* image,
   return AImage_getHeight_(image, height);
 }
 
-media_status_t AndroidImageReader::AImageReader_new(int32_t width,
-                                                    int32_t height,
-                                                    int32_t format,
-                                                    int32_t maxImages,
-                                                    AImageReader** reader) {
-  return AImageReader_new_(width, height, format, maxImages, reader);
+media_status_t AndroidImageReader::AImage_getCropRect(const AImage* image,
+                                                      AImageCropRect* rect) {
+  return AImage_getCropRect_(image, rect);
+}
+
+media_status_t AndroidImageReader::AImageReader_newWithUsage(
+    int32_t width,
+    int32_t height,
+    int32_t format,
+    uint64_t usage,
+    int32_t maxImages,
+    AImageReader** reader) {
+  return AImageReader_newWithUsage_(width, height, format, usage, maxImages,
+                                    reader);
 }
 
 media_status_t AndroidImageReader::AImageReader_setImageListener(
@@ -118,6 +129,12 @@ media_status_t AndroidImageReader::AImageReader_setImageListener(
 
 void AndroidImageReader::AImageReader_delete(AImageReader* reader) {
   AImageReader_delete_(reader);
+}
+
+media_status_t AndroidImageReader::AImageReader_getFormat(
+    const AImageReader* reader,
+    int32_t* format) {
+  return AImageReader_getFormat_(reader, format);
 }
 
 media_status_t AndroidImageReader::AImageReader_getWindow(
@@ -131,6 +148,13 @@ media_status_t AndroidImageReader::AImageReader_acquireLatestImageAsync(
     AImage** image,
     int* acquireFenceFd) {
   return AImageReader_acquireLatestImageAsync_(reader, image, acquireFenceFd);
+}
+
+media_status_t AndroidImageReader::AImageReader_acquireNextImageAsync(
+    AImageReader* reader,
+    AImage** image,
+    int* acquireFenceFd) {
+  return AImageReader_acquireNextImageAsync_(reader, image, acquireFenceFd);
 }
 
 jobject AndroidImageReader::ANativeWindow_toSurface(JNIEnv* env,

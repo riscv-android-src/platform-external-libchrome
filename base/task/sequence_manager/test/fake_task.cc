@@ -7,9 +7,19 @@
 namespace base {
 namespace sequence_manager {
 
-FakeTask::FakeTask()
-    : TaskQueue::Task(TaskQueue::PostedTask(OnceClosure(), FROM_HERE),
-                      TimeTicks()) {}
+FakeTask::FakeTask() : FakeTask(0 /* task_type */) {}
+
+FakeTask::FakeTask(TaskType task_type)
+    : Task(internal::PostedTask(nullptr,
+                                OnceClosure(),
+                                FROM_HERE,
+                                TimeDelta(),
+                                Nestable::kNestable,
+                                task_type),
+           TimeTicks(),
+           EnqueueOrder(),
+           EnqueueOrder(),
+           internal::WakeUpResolution::kLow) {}
 
 FakeTaskTiming::FakeTaskTiming()
     : TaskTiming(false /* has_wall_time */, false /* has_thread_time */) {}
@@ -19,6 +29,7 @@ FakeTaskTiming::FakeTaskTiming(TimeTicks start, TimeTicks end)
   has_wall_time_ = true;
   start_time_ = start;
   end_time_ = end;
+  state_ = State::Finished;
 }
 
 FakeTaskTiming::FakeTaskTiming(TimeTicks start,
@@ -29,6 +40,7 @@ FakeTaskTiming::FakeTaskTiming(TimeTicks start,
   has_thread_time_ = true;
   start_thread_time_ = thread_start;
   end_thread_time_ = thread_end;
+  state_ = State::Finished;
 }
 
 }  // namespace sequence_manager

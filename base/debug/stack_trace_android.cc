@@ -12,6 +12,7 @@
 #include <ostream>
 
 #include "base/debug/proc_maps_linux.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 
@@ -52,6 +53,11 @@ _Unwind_Reason_Code TraceStackFrame(_Unwind_Context* context, void* arg) {
   return _URC_NO_REASON;
 }
 
+bool EndsWith(const std::string& s, const std::string& suffix) {
+  return s.size() >= suffix.size() &&
+         s.substr(s.size() - suffix.size(), suffix.size()) == suffix;
+}
+
 }  // namespace
 
 namespace base {
@@ -69,23 +75,22 @@ bool EnableInProcessStackDumping() {
   return (sigaction(SIGPIPE, &action, NULL) == 0);
 }
 
-StackTrace::StackTrace(size_t count) {
-  count = std::min(arraysize(trace_), count);
-
-  StackCrawlState state(reinterpret_cast<uintptr_t*>(trace_), count);
+size_t CollectStackTrace(void** trace, size_t count) {
+  StackCrawlState state(reinterpret_cast<uintptr_t*>(trace), count);
   _Unwind_Backtrace(&TraceStackFrame, &state);
-  count_ = state.frame_count;
+  return state.frame_count;
 }
 
-void StackTrace::Print() const {
-  std::string backtrace = ToString();
+void StackTrace::PrintWithPrefix(const char* prefix_string) const {
+  std::string backtrace = ToStringWithPrefix(prefix_string);
   __android_log_write(ANDROID_LOG_ERROR, "chromium", backtrace.c_str());
 }
 
 // NOTE: Native libraries in APKs are stripped before installing. Print out the
 // relocatable address and library names so host computers can use tools to
 // symbolize and demangle (e.g., addr2line, c++filt).
-void StackTrace::OutputToStream(std::ostream* os) const {
+void StackTrace::OutputToStreamWithPrefix(std::ostream* os,
+                                          const char* prefix_string) const {
   std::string proc_maps;
   std::vector<MappedMemoryRegion> regions;
   // Allow IO to read /proc/self/maps. Reading this file doesn't hit the disk
@@ -116,12 +121,24 @@ void StackTrace::OutputToStream(std::ostream* os) const {
       ++iter;
     }
 
-    *os << base::StringPrintf("#%02zd " FMT_ADDR " ", i, address);
+    if (prefix_string)
+      *os << prefix_string;
+
+    // Adjust absolute address to be an offset within the mapped region, to
+    // match the format dumped by Android's crash output.
+    if (iter != regions.end()) {
+      address -= iter->start;
+    }
+
+    // The format below intentionally matches that of Android's debuggerd
+    // output. This simplifies decoding by scripts such as stack.py.
+    *os << base::StringPrintf("#%02zd pc " FMT_ADDR " ", i, address);
 
     if (iter != regions.end()) {
-      uintptr_t rel_pc = address - iter->start + iter->offset;
-      const char* path = iter->path.c_str();
-      *os << base::StringPrintf("%s+" FMT_ADDR, path, rel_pc);
+      *os << base::StringPrintf("%s", iter->path.c_str());
+      if (EndsWith(iter->path, ".apk")) {
+        *os << base::StringPrintf(" (offset 0x%llx)", iter->offset);
+      }
     } else {
       *os << "<unknown>";
     }

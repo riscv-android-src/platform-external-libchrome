@@ -6,65 +6,91 @@
 
 #include "base/lazy_instance.h"
 #include "base/threading/thread_local.h"
+#include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
+#include "base/trace_event/base_tracing.h"
+#include "base/tracing_buildflags.h"
+#include "build/build_config.h"
+
+#if BUILDFLAG(ENABLE_BASE_TRACING)
+#include "third_party/perfetto/protos/perfetto/trace/track_event/source_location.pbzero.h"
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 
 namespace base {
 
 namespace {
 
-LazyInstance<ThreadLocalPointer<internal::BlockingObserver>>::Leaky
-    tls_blocking_observer = LAZY_INSTANCE_INITIALIZER;
-
-// Last ScopedBlockingCall instantiated on this thread.
-LazyInstance<ThreadLocalPointer<ScopedBlockingCall>>::Leaky
-    tls_last_scoped_blocking_call = LAZY_INSTANCE_INITIALIZER;
+#if DCHECK_IS_ON()
+// Used to verify that the trace events used in the constructor do not result in
+// instantiating a ScopedBlockingCall themselves (which would cause an infinite
+// reentrancy loop).
+LazyInstance<ThreadLocalBoolean>::Leaky tls_construction_in_progress =
+    LAZY_INSTANCE_INITIALIZER;
+#endif
 
 }  // namespace
 
-ScopedBlockingCall::ScopedBlockingCall(BlockingType blocking_type)
-    : blocking_observer_(tls_blocking_observer.Get().Get()),
-      previous_scoped_blocking_call_(tls_last_scoped_blocking_call.Get().Get()),
-      is_will_block_(blocking_type == BlockingType::WILL_BLOCK ||
-                     (previous_scoped_blocking_call_ &&
-                      previous_scoped_blocking_call_->is_will_block_)) {
-  tls_last_scoped_blocking_call.Get().Set(this);
+ScopedBlockingCall::ScopedBlockingCall(const Location& from_here,
+                                       BlockingType blocking_type)
+    : UncheckedScopedBlockingCall(
+          from_here,
+          blocking_type,
+          UncheckedScopedBlockingCall::BlockingCallType::kRegular) {
+#if DCHECK_IS_ON()
+  DCHECK(!tls_construction_in_progress.Get().Get());
+  tls_construction_in_progress.Get().Set(true);
+#endif
 
-  if (blocking_observer_) {
-    if (!previous_scoped_blocking_call_) {
-      blocking_observer_->BlockingStarted(blocking_type);
-    } else if (blocking_type == BlockingType::WILL_BLOCK &&
-               !previous_scoped_blocking_call_->is_will_block_) {
-      blocking_observer_->BlockingTypeUpgraded();
-    }
-  }
+  internal::AssertBlockingAllowed();
+  TRACE_EVENT_BEGIN(
+      "base", "ScopedBlockingCall", [&](perfetto::EventContext ctx) {
+        perfetto::protos::pbzero::SourceLocation* source_location_data =
+            ctx.event()->set_source_location();
+        source_location_data->set_file_name(from_here.file_name());
+        source_location_data->set_function_name(from_here.function_name());
+      });
+
+#if DCHECK_IS_ON()
+  tls_construction_in_progress.Get().Set(false);
+#endif
 }
 
 ScopedBlockingCall::~ScopedBlockingCall() {
-  DCHECK_EQ(this, tls_last_scoped_blocking_call.Get().Get());
-  tls_last_scoped_blocking_call.Get().Set(previous_scoped_blocking_call_);
-  if (blocking_observer_ && !previous_scoped_blocking_call_)
-    blocking_observer_->BlockingEnded();
+  TRACE_EVENT_END("base");
 }
 
 namespace internal {
 
-void SetBlockingObserverForCurrentThread(BlockingObserver* blocking_observer) {
-  DCHECK(!tls_blocking_observer.Get().Get());
-  tls_blocking_observer.Get().Set(blocking_observer);
+ScopedBlockingCallWithBaseSyncPrimitives::
+    ScopedBlockingCallWithBaseSyncPrimitives(const Location& from_here,
+                                             BlockingType blocking_type)
+    : UncheckedScopedBlockingCall(
+          from_here,
+          blocking_type,
+          UncheckedScopedBlockingCall::BlockingCallType::kBaseSyncPrimitives) {
+#if DCHECK_IS_ON()
+  DCHECK(!tls_construction_in_progress.Get().Get());
+  tls_construction_in_progress.Get().Set(true);
+#endif
+
+  internal::AssertBaseSyncPrimitivesAllowed();
+  TRACE_EVENT_BEGIN(
+      "base", "ScopedBlockingCallWithBaseSyncPrimitives",
+      [&](perfetto::EventContext ctx) {
+        perfetto::protos::pbzero::SourceLocation* source_location_data =
+            ctx.event()->set_source_location();
+        source_location_data->set_file_name(from_here.file_name());
+        source_location_data->set_function_name(from_here.function_name());
+      });
+
+#if DCHECK_IS_ON()
+  tls_construction_in_progress.Get().Set(false);
+#endif
 }
 
-void ClearBlockingObserverForTesting() {
-  tls_blocking_observer.Get().Set(nullptr);
-}
-
-ScopedClearBlockingObserverForTesting::ScopedClearBlockingObserverForTesting()
-    : blocking_observer_(tls_blocking_observer.Get().Get()) {
-  tls_blocking_observer.Get().Set(nullptr);
-}
-
-ScopedClearBlockingObserverForTesting::
-    ~ScopedClearBlockingObserverForTesting() {
-  DCHECK(!tls_blocking_observer.Get().Get());
-  tls_blocking_observer.Get().Set(blocking_observer_);
+ScopedBlockingCallWithBaseSyncPrimitives::
+    ~ScopedBlockingCallWithBaseSyncPrimitives() {
+  TRACE_EVENT_END("base");
 }
 
 }  // namespace internal

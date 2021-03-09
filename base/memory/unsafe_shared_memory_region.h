@@ -32,6 +32,7 @@ class BASE_EXPORT UnsafeSharedMemoryRegion {
   // Creates a new UnsafeSharedMemoryRegion instance of a given size that can be
   // used for mapping writable shared memory into the virtual address space.
   static UnsafeSharedMemoryRegion Create(size_t size);
+  using CreateFunction = decltype(Create);
 
   // Returns an UnsafeSharedMemoryRegion built from a platform-specific handle
   // that was taken from another UnsafeSharedMemoryRegion instance. Returns an
@@ -94,19 +95,21 @@ class BASE_EXPORT UnsafeSharedMemoryRegion {
     return handle_.GetGUID();
   }
 
- private:
-  FRIEND_TEST_ALL_PREFIXES(DiscardableSharedMemoryTest,
-                           LockShouldFailIfPlatformLockPagesFails);
-  friend class DiscardableSharedMemory;
-
-  explicit UnsafeSharedMemoryRegion(subtle::PlatformSharedMemoryRegion handle);
-
   // Returns a platform shared memory handle. |this| remains the owner of the
   // handle.
   subtle::PlatformSharedMemoryRegion::PlatformHandle GetPlatformHandle() const {
     DCHECK(IsValid());
     return handle_.GetPlatformHandle();
   }
+
+ private:
+  friend class SharedMemoryHooks;
+
+  explicit UnsafeSharedMemoryRegion(subtle::PlatformSharedMemoryRegion handle);
+
+  static void set_create_hook(CreateFunction* hook) { create_hook_ = hook; }
+
+  static CreateFunction* create_hook_;
 
   subtle::PlatformSharedMemoryRegion handle_;
 

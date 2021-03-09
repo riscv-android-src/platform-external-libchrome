@@ -13,11 +13,18 @@
 #include <string>
 
 #include "base/at_exit.h"
-#include "base/logging.h"
+#include "base/check.h"
 #include "base/macros.h"
-#include "base/test/scoped_feature_list.h"
-#include "base/test/trace_to_file.h"
+#include "base/tracing_buildflags.h"
 #include "build/build_config.h"
+
+#if BUILDFLAG(ENABLE_BASE_TRACING)
+#include "base/test/trace_to_file.h"
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
+
+namespace logging {
+class ScopedLogAssertHandler;
+}
 
 namespace testing {
 class TestInfo;
@@ -28,7 +35,7 @@ namespace base {
 class XmlUnitTestResultPrinter;
 
 // Instantiates TestSuite, runs it and returns exit code.
-int RunUnitTestsUsingBaseTestSuite(int argc, char **argv);
+int RunUnitTestsUsingBaseTestSuite(int argc, char** argv);
 
 class TestSuite {
  public:
@@ -41,18 +48,14 @@ class TestSuite {
 #endif  // defined(OS_WIN)
   virtual ~TestSuite();
 
-  // Returns true if the test is marked as "MAYBE_".
-  // When using different prefixes depending on platform, we use MAYBE_ and
-  // preprocessor directives to replace MAYBE_ with the target prefix.
-  static bool IsMarkedMaybe(const testing::TestInfo& test);
-
-  void CatchMaybeTests();
-
-  void ResetCommandLine();
-
-  void AddTestLauncherResultPrinter();
-
   int Run();
+
+  // Disables checks for thread and process priority at the beginning and end of
+  // each test. Most tests should not use this.
+  void DisableCheckForThreadAndProcessPriority();
+
+  // Disables checks for certain global objects being leaked across tests.
+  void DisableCheckForLeakedGlobals();
 
  protected:
   // By default fatal log messages (e.g. from DCHECKs) result in error dialogs
@@ -77,6 +80,8 @@ class TestSuite {
   std::unique_ptr<base::AtExitManager> at_exit_manager_;
 
  private:
+  void AddTestLauncherResultPrinter();
+
   void InitializeFromCommandLine(int argc, char** argv);
 #if defined(OS_WIN)
   void InitializeFromCommandLine(int argc, wchar_t** argv);
@@ -85,15 +90,19 @@ class TestSuite {
   // Basic initialization for the test suite happens here.
   void PreInitialize();
 
+#if BUILDFLAG(ENABLE_BASE_TRACING)
   test::TraceToFile trace_to_file_;
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 
-  bool initialized_command_line_;
-
-  test::ScopedFeatureList scoped_feature_list_;
+  bool initialized_command_line_ = false;
 
   XmlUnitTestResultPrinter* printer_ = nullptr;
 
   std::unique_ptr<logging::ScopedLogAssertHandler> assert_handler_;
+
+  bool check_for_leaked_globals_ = true;
+  bool check_for_thread_and_process_priority_ = true;
+  bool is_initialized_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TestSuite);
 };

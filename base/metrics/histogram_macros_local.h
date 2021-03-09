@@ -5,7 +5,6 @@
 #ifndef BASE_METRICS_HISTOGRAM_MACROS_LOCAL_H_
 #define BASE_METRICS_HISTOGRAM_MACROS_LOCAL_H_
 
-#include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_macros_internal.h"
 #include "base/time/time.h"
@@ -19,10 +18,10 @@
 // For usage details, see the equivalents in histogram_macros.h.
 
 #define LOCAL_HISTOGRAM_ENUMERATION(name, ...)                          \
-  CR_EXPAND_ARG(INTERNAL_UMA_HISTOGRAM_ENUMERATION_GET_MACRO(           \
+  INTERNAL_UMA_HISTOGRAM_ENUMERATION_GET_MACRO(                         \
       __VA_ARGS__, INTERNAL_UMA_HISTOGRAM_ENUMERATION_SPECIFY_BOUNDARY, \
-      INTERNAL_UMA_HISTOGRAM_ENUMERATION_DEDUCE_BOUNDARY)(              \
-      name, __VA_ARGS__, base::HistogramBase::kNoFlags))
+      INTERNAL_UMA_HISTOGRAM_ENUMERATION_DEDUCE_BOUNDARY)               \
+  (name, __VA_ARGS__, base::HistogramBase::kNoFlags)
 
 #define LOCAL_HISTOGRAM_BOOLEAN(name, sample)                                  \
     STATIC_HISTOGRAM_POINTER_BLOCK(name, AddBoolean(sample),                   \
@@ -70,6 +69,12 @@
       base::Histogram::FactoryTimeGet(name, min, max, bucket_count,        \
                                       base::HistogramBase::kNoFlags))
 
+#define LOCAL_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(name, sample, min, max, \
+                                                  bucket_count)           \
+  STATIC_HISTOGRAM_POINTER_BLOCK(                                         \
+      name, AddTimeMicrosecondsGranularity(sample),                       \
+      base::Histogram::FactoryMicrosecondsTimeGet(                        \
+          name, min, max, bucket_count, base::HistogramBase::kNoFlags))
 //------------------------------------------------------------------------------
 // Memory histograms.
 //

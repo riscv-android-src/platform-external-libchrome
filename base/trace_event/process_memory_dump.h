@@ -26,9 +26,16 @@
 #define COUNT_RESIDENT_BYTES_SUPPORTED
 #endif
 
+namespace perfetto {
+namespace protos {
+namespace pbzero {
+class MemoryTrackerSnapshot;
+}
+}  // namespace protos
+}  // namespace perfetto
+
 namespace base {
 
-class SharedMemory;
 class UnguessableToken;
 
 namespace trace_event {
@@ -69,7 +76,8 @@ class BASE_EXPORT ProcessMemoryDump {
   // |start_address| and |mapped_size|. |mapped_size| is specified in bytes. The
   // value returned is valid only if the given range is currently mmapped by the
   // process. The |start_address| must be page-aligned.
-  static size_t CountResidentBytes(void* start_address, size_t mapped_size);
+  static base::Optional<size_t> CountResidentBytes(void* start_address,
+                                                   size_t mapped_size);
 
   // The same as above, but the given mapped range should belong to the
   // shared_memory's mapped region.
@@ -177,16 +185,15 @@ class BASE_EXPORT ProcessMemoryDump {
                                    const MemoryAllocatorDumpGuid& target,
                                    int importance);
 
-  // Creates ownership edges for memory backed by base::SharedMemory. Handles
-  // the case of cross process sharing and importnace of ownership for the case
-  // with and without the base::SharedMemory dump provider. The new version
-  // should just use global dumps created by SharedMemoryTracker and this
-  // function handles the transition until we get SharedMemory IDs through mojo
-  // channel crbug.com/713763. The weak version creates a weak global dump.
+  // Creates ownership edges for shared memory. Handles the case of cross
+  // process sharing and importance of ownership for the case with and without
+  // the shared memory dump provider. This handles both shared memory from both
+  // legacy base::SharedMemory as well as current base::SharedMemoryMapping. The
+  // weak version creates a weak global dump.
   // |client_local_dump_guid| The guid of the local dump created by the client
   // of base::SharedMemory.
-  // |shared_memory_guid| The ID of the base::SharedMemory that is assigned
-  // globally, used to create global dump edges in the new model.
+  // |shared_memory_guid| The ID of the shared memory that is assigned globally,
+  // used to create global dump edges in the new model.
   // |importance| Importance of the global dump edges to say if the current
   // process owns the memory segment.
   void CreateSharedMemoryOwnershipEdge(
@@ -226,6 +233,10 @@ class BASE_EXPORT ProcessMemoryDump {
   // dumps.
   void SerializeAllocatorDumpsInto(TracedValue* value) const;
 
+  void SerializeAllocatorDumpsInto(
+      perfetto::protos::pbzero::MemoryTrackerSnapshot* memory_snapshot,
+      const base::ProcessId pid) const;
+
   const MemoryDumpArgs& dump_args() const { return dump_args_; }
 
  private:
@@ -242,7 +253,7 @@ class BASE_EXPORT ProcessMemoryDump {
   const UnguessableToken& process_token() const { return process_token_; }
   void set_process_token_for_testing(UnguessableToken token) {
     process_token_ = token;
-  };
+  }
 
   // Returns the Guid of the dump for the given |absolute_name| for
   // for the given process' token. |process_token| is used to disambiguate GUIDs

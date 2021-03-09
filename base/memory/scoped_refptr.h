@@ -11,8 +11,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "base/check.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
 #include "base/macros.h"
 
 template <class T>
@@ -24,9 +24,17 @@ template <class, typename>
 class RefCounted;
 template <class, typename>
 class RefCountedThreadSafe;
+class SequencedTaskRunner;
+class WrappedPromise;
 
 template <typename T>
 scoped_refptr<T> AdoptRef(T* t);
+
+namespace internal {
+
+class BasePromise;
+
+}  // namespace internal
 
 namespace subtle {
 
@@ -62,7 +70,7 @@ template <typename T>
 scoped_refptr<T> AdoptRef(T* obj) {
   using Tag = std::decay_t<decltype(T::kRefCountPreference)>;
   static_assert(std::is_same<subtle::StartRefCountFromOneTag, Tag>::value,
-                "Use AdoptRef only for the reference count starts from one.");
+                "Use AdoptRef only if the reference count starts from one.");
 
   DCHECK(obj);
   DCHECK(obj->HasOneRef());
@@ -170,8 +178,16 @@ class scoped_refptr {
 
   constexpr scoped_refptr() = default;
 
-  // Constructs from raw pointer. constexpr if |p| is null.
-  constexpr scoped_refptr(T* p) : ptr_(p) {
+  // Allow implicit construction from nullptr.
+  constexpr scoped_refptr(std::nullptr_t) {}
+
+  // Constructs from a raw pointer. Note that this constructor allows implicit
+  // conversion from T* to scoped_refptr<T> which is strongly discouraged. If
+  // you are creating a new ref-counted object please use
+  // base::MakeRefCounted<T>() or base::WrapRefCounted<T>(). Otherwise you
+  // should move or copy construct from an existing scoped_refptr<T> to the
+  // ref-counted object.
+  scoped_refptr(T* p) : ptr_(p) {
     if (ptr_)
       AddRef(ptr_);
   }
@@ -220,6 +236,11 @@ class scoped_refptr {
     return ptr_;
   }
 
+  scoped_refptr& operator=(std::nullptr_t) {
+    reset();
+    return *this;
+  }
+
   scoped_refptr& operator=(T* p) { return *this = scoped_refptr(p); }
 
   // Unified assignment operator.
@@ -231,6 +252,10 @@ class scoped_refptr {
   // Sets managed object to null and releases reference to the previous managed
   // object, if it existed.
   void reset() { scoped_refptr().swap(*this); }
+
+  // Returns the owned pointer (if any), releasing ownership to the caller. The
+  // caller is responsible for managing the lifetime of the reference.
+  T* release() WARN_UNUSED_RESULT;
 
   void swap(scoped_refptr& r) noexcept { std::swap(ptr_, r.ptr_); }
 
@@ -257,6 +282,12 @@ class scoped_refptr {
  private:
   template <typename U>
   friend scoped_refptr<U> base::AdoptRef(U*);
+  friend class ::base::SequencedTaskRunner;
+
+  // Friend access so these classes can use the constructor below as part of a
+  // binary size optimization.
+  friend class ::base::internal::BasePromise;
+  friend class ::base::WrappedPromise;
 
   scoped_refptr(T* p, base::subtle::AdoptRefTag) : ptr_(p) {}
 
@@ -271,6 +302,13 @@ class scoped_refptr {
   static void AddRef(T* ptr);
   static void Release(T* ptr);
 };
+
+template <typename T>
+T* scoped_refptr<T>::release() {
+  T* ptr = ptr_;
+  ptr_ = nullptr;
+  return ptr;
+}
 
 // static
 template <typename T>

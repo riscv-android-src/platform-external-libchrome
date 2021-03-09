@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -91,9 +92,9 @@ TEST_F(RTLTest, GetFirstStrongCharacterDirection) {
       LEFT_TO_RIGHT },
    };
 
-  for (size_t i = 0; i < arraysize(cases); ++i)
-    EXPECT_EQ(cases[i].direction,
-              GetFirstStrongCharacterDirection(WideToUTF16(cases[i].text)));
+  for (auto& i : cases)
+    EXPECT_EQ(i.direction,
+              GetFirstStrongCharacterDirection(WideToUTF16(i.text)));
 }
 
 
@@ -153,9 +154,9 @@ TEST_F(RTLTest, GetLastStrongCharacterDirection) {
       LEFT_TO_RIGHT },
    };
 
-  for (size_t i = 0; i < arraysize(cases); ++i)
-    EXPECT_EQ(cases[i].direction,
-              GetLastStrongCharacterDirection(WideToUTF16(cases[i].text)));
+  for (auto& i : cases)
+    EXPECT_EQ(i.direction,
+              GetLastStrongCharacterDirection(WideToUTF16(i.text)));
 }
 
 TEST_F(RTLTest, GetStringDirection) {
@@ -231,9 +232,8 @@ TEST_F(RTLTest, GetStringDirection) {
       LEFT_TO_RIGHT },
    };
 
-  for (size_t i = 0; i < arraysize(cases); ++i)
-    EXPECT_EQ(cases[i].direction,
-              GetStringDirection(WideToUTF16(cases[i].text)));
+  for (auto& i : cases)
+    EXPECT_EQ(i.direction, GetStringDirection(WideToUTF16(i.text)));
 }
 
 TEST_F(RTLTest, WrapPathWithLTRFormatting) {
@@ -266,18 +266,17 @@ TEST_F(RTLTest, WrapPathWithLTRFormatting) {
     L""
   };
 
-  for (size_t i = 0; i < arraysize(cases); ++i) {
+  for (auto*& i : cases) {
     FilePath path;
 #if defined(OS_WIN)
-    std::wstring win_path(cases[i]);
+    std::wstring win_path(i);
     std::replace(win_path.begin(), win_path.end(), '/', '\\');
     path = FilePath(win_path);
     std::wstring wrapped_expected =
         std::wstring(L"\x202a") + win_path + L"\x202c";
 #else
-    path = FilePath(base::SysWideToNativeMB(cases[i]));
-    std::wstring wrapped_expected =
-        std::wstring(L"\x202a") + cases[i] + L"\x202c";
+    path = FilePath(base::SysWideToNativeMB(i));
+    std::wstring wrapped_expected = std::wstring(L"\x202a") + i + L"\x202c";
 #endif
     string16 localized_file_path_string;
     WrapPathWithLTRFormatting(path, &localized_file_path_string);
@@ -311,8 +310,8 @@ TEST_F(RTLTest, WrapString) {
     WrapStringWithRTLFormatting(&empty);
     EXPECT_TRUE(empty.empty());
 
-    for (size_t i = 0; i < arraysize(cases); ++i) {
-      string16 input = WideToUTF16(cases[i]);
+    for (auto*& test_case : cases) {
+      string16 input = WideToUTF16(test_case);
       string16 ltr_wrap = input;
       WrapStringWithLTRFormatting(&ltr_wrap);
       EXPECT_EQ(ltr_wrap[0], kLeftToRightEmbeddingMark);
@@ -352,11 +351,11 @@ TEST_F(RTLTest, GetDisplayStringInLTRDirectionality) {
   for (size_t i = 0; i < 2; ++i) {
     // Toggle the application default text direction (to try each direction).
     SetRTLForTesting(!IsRTL());
-    for (size_t i = 0; i < arraysize(cases); ++i) {
-      string16 input = WideToUTF16(cases[i].path);
+    for (auto& test_case : cases) {
+      string16 input = WideToUTF16(test_case.path);
       string16 output = GetDisplayStringInLTRDirectionality(input);
       // Test the expected wrapping behavior for the current UI directionality.
-      if (IsRTL() ? cases[i].wrap_rtl : cases[i].wrap_ltr)
+      if (IsRTL() ? test_case.wrap_rtl : test_case.wrap_ltr)
         EXPECT_NE(output, input);
       else
         EXPECT_EQ(output, input);
@@ -440,17 +439,18 @@ TEST_F(RTLTest, UnadjustStringForLocaleDirection) {
     // Toggle the application default text direction (to try each direction).
     SetRTLForTesting(!IsRTL());
 
-    for (size_t i = 0; i < arraysize(cases); ++i) {
-      string16 test_case = WideToUTF16(cases[i]);
-      string16 adjusted_string = test_case;
+    for (auto*& test_case : cases) {
+      string16 unadjusted_string = WideToUTF16(test_case);
+      string16 adjusted_string = unadjusted_string;
 
       if (!AdjustStringForLocaleDirection(&adjusted_string))
         continue;
 
-      EXPECT_NE(test_case, adjusted_string);
+      EXPECT_NE(unadjusted_string, adjusted_string);
       EXPECT_TRUE(UnadjustStringForLocaleDirection(&adjusted_string));
-      EXPECT_EQ(test_case, adjusted_string) << " for test case [" << test_case
-                                            << "] with IsRTL() == " << IsRTL();
+      EXPECT_EQ(unadjusted_string, adjusted_string)
+          << " for test case [" << unadjusted_string
+          << "] with IsRTL() == " << IsRTL();
     }
   }
 
@@ -490,9 +490,9 @@ TEST_F(RTLTest, EnsureTerminatedDirectionalFormatting) {
   for (size_t i = 0; i < 2; ++i) {
     // Toggle the application default text direction (to try each direction).
     SetRTLForTesting(!IsRTL());
-    for (size_t i = 0; i < arraysize(cases); ++i) {
-      string16 unsanitized_text = WideToUTF16(cases[i].unformated_text);
-      string16 sanitized_text = WideToUTF16(cases[i].formatted_text);
+    for (auto& test_case : cases) {
+      string16 unsanitized_text = WideToUTF16(test_case.unformated_text);
+      string16 sanitized_text = WideToUTF16(test_case.formatted_text);
       EnsureTerminatedDirectionalFormatting(&unsanitized_text);
       EXPECT_EQ(sanitized_text, unsanitized_text);
     }
@@ -523,16 +523,15 @@ TEST_F(RTLTest, SanitizeUserSuppliedString) {
 
   };
 
-  for (size_t i = 0; i < arraysize(cases); ++i) {
+  for (auto& i : cases) {
     // On Windows for an LTR locale, no changes to the string are made.
     string16 prefix, suffix = WideToUTF16(L"");
 #if !defined(OS_WIN)
     prefix = WideToUTF16(L"\x200e\x202b");
     suffix = WideToUTF16(L"\x202c\x200e");
 #endif  // !OS_WIN
-    string16 unsanitized_text = WideToUTF16(cases[i].unformatted_text);
-    string16 sanitized_text =
-        prefix + WideToUTF16(cases[i].formatted_text) + suffix;
+    string16 unsanitized_text = WideToUTF16(i.unformatted_text);
+    string16 sanitized_text = prefix + WideToUTF16(i.formatted_text) + suffix;
     SanitizeUserSuppliedString(&unsanitized_text);
     EXPECT_EQ(sanitized_text, unsanitized_text);
   }

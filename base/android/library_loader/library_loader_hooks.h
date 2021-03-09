@@ -9,8 +9,11 @@
 
 #include "base/base_export.h"
 #include "base/callback.h"
+#include "base/command_line.h"
+#include "base/metrics/field_trial.h"
 
 namespace base {
+
 namespace android {
 
 // The process the shared library is loaded in.
@@ -26,16 +29,36 @@ enum LibraryProcessType {
   PROCESS_WEBVIEW = 3,
   // Shared library is running in child process as part of webview.
   PROCESS_WEBVIEW_CHILD = 4,
+  // Shared library is running in the app that uses weblayer.
+  PROCESS_WEBLAYER = 5,
+  // Shared library is running in child process as part of weblayer.
+  PROCESS_WEBLAYER_CHILD = 6,
+  // Shared library is running in a non-embedded WebView process.
+  PROCESS_WEBVIEW_NONEMBEDDED = 7,
 };
+
+// Returns the library process type this library was loaded for.
+BASE_EXPORT LibraryProcessType GetLibraryProcessType();
+
+// Whether fewer code should be prefetched, and no-readahead should be set.
+// Returns true on low-end devices, where this speeds up startup, and false
+// elsewhere, where it slows it down. See
+// https://bugs.chromium.org/p/chromium/issues/detail?id=758566#c71 for details.
+BASE_EXPORT bool IsUsingOrderfileOptimization();
 
 typedef bool NativeInitializationHook(LibraryProcessType library_process_type);
 
 BASE_EXPORT void SetNativeInitializationHook(
     NativeInitializationHook native_initialization_hook);
 
+typedef void NonMainDexJniRegistrationHook();
+
+BASE_EXPORT void SetNonMainDexJniRegistrationHook(
+    NonMainDexJniRegistrationHook jni_registration_hook);
+
 // Record any pending renderer histogram value as histograms.  Pending values
-// are set by RegisterChromiumAndroidLinkerRendererHistogram and
-// RegisterLibraryPreloaderRendererHistogram.
+// are set by
+// JNI_LibraryLoader_RegisterChromiumAndroidLinkerRendererHistogram().
 BASE_EXPORT void RecordLibraryLoaderRendererHistograms();
 
 // Typedef for hook function to be called (indirectly from Java) once the
@@ -45,7 +68,8 @@ BASE_EXPORT void RecordLibraryLoaderRendererHistograms();
 // Note: this can't use base::Callback because there is no way of initializing
 // the default callback without using static objects, which we forbid.
 typedef bool LibraryLoadedHook(JNIEnv* env,
-                               jclass clazz);
+                               jclass clazz,
+                               LibraryProcessType library_process_type);
 
 // Set the hook function to be called (from Java) once the libraries are loaded.
 // SetLibraryLoadedHook may only be called from JNI_OnLoad. The hook function
