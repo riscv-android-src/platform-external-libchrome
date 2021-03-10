@@ -7,7 +7,9 @@
 #include "base/observer_list_threadsafe.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/trace_event/base_tracing.h"
+#if BUILDFLAG(ENABLE_BASE_TRACING)
 #include "base/trace_event/memory_dump_manager.h"  // no-presubmit-check
+#endif
 
 namespace base {
 
@@ -107,6 +109,7 @@ MemoryPressureListener::~MemoryPressureListener() {
 }
 
 void MemoryPressureListener::Notify(MemoryPressureLevel memory_pressure_level) {
+  #if BUILDFLAG(ENABLE_BASE_TRACING)
   TRACE_EVENT(
       "base", "MemoryPressureListener::Notify",
       [&](perfetto::EventContext ctx) {
@@ -118,6 +121,7 @@ void MemoryPressureListener::Notify(MemoryPressureLevel memory_pressure_level) {
                 &ctx,
                 base::trace_event::TraceSourceLocation(creation_location_)));
       });
+  #endif
   callback_.Run(memory_pressure_level);
 }
 
@@ -132,6 +136,7 @@ void MemoryPressureListener::SyncNotify(
 void MemoryPressureListener::NotifyMemoryPressure(
     MemoryPressureLevel memory_pressure_level) {
   DCHECK_NE(memory_pressure_level, MEMORY_PRESSURE_LEVEL_NONE);
+  #if BUILDFLAG(ENABLE_BASE_TRACING)
   TRACE_EVENT_INSTANT(
       trace_event::MemoryDumpManager::kTraceCategory,
       "MemoryPressureListener::NotifyMemoryPressure",
@@ -140,6 +145,7 @@ void MemoryPressureListener::NotifyMemoryPressure(
         auto* data = event->set_chrome_memory_pressure_notification();
         data->set_level(LevelAsTraceEnum(memory_pressure_level));
       });
+  #endif
   if (AreNotificationsSuppressed())
     return;
   DoNotifyMemoryPressure(memory_pressure_level);

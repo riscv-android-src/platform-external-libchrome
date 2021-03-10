@@ -340,7 +340,7 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 #endif  // defined(__clang_analyzer__)
 
 // Use nomerge attribute to disable optimization of merging multiple same calls.
-#if defined(__clang__) && __has_attribute(nomerge)
+#if defined(__clang__) && __has_attribute(nomerge) && !defined(__ANDROID_EMULATOR__)
 #define NOMERGE [[clang::nomerge]]
 #else
 #define NOMERGE
