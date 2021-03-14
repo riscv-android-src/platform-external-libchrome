@@ -70,6 +70,12 @@ void RandBytes(void* output, size_t output_length) {
   // the libc wrapper, because we might not have an up-to-date libc (e.g. on
   // some bots).
   const ssize_t r = HANDLE_EINTR(sys_getrandom(output, output_length, 0));
+#elif defined(LIBCHROME_USE_DEV_URANDOM)
+  // For reasons unknown yet at b/182295239, gale didn't boot if getrandom is called.
+  // Currently we suspect some seccomp filters or kernel/glibc version but
+  // there's no deterministic evidence to point to any of them.
+  // Use this workaround to skip to /dev/urandom fallback.
+  const ssize_t r = -1;
 #else
   const ssize_t r = HANDLE_EINTR(getrandom(output, output_length, 0));
 #endif
