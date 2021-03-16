@@ -1,15 +1,37 @@
-From f9cbaa6b6fa274bab342f89d07f7f591f8c32dba Mon Sep 17 00:00:00 2001
+From b3837000b72b491734f8f694e091dd283584f9ed Mon Sep 17 00:00:00 2001
 From: hscham <hscham@chromium.org>
 Date: Mon, 8 Mar 2021 19:20:30 +0900
-Subject: [PATCH 2/2] Add base::MakeStringPiece
+Subject: [PATCH] Add base::MakeStringPiece to replace
+ base::BasicStringPiece(Iter, Iter)
 
-To replace deprecated base::BasicStringPiece(Iter, Iter)
+base::BasicStringPiece(Iter, Iter) will be deprecated.
 
 Change-Id: Ieece4fbca31e8a14c1ed905e5aef2356ab4f340d
 ---
- base/strings/string_util.h | 25 +++++++++++++++++++++++++
- 1 file changed, 25 insertions(+)
+ base/strings/string_piece.h |  9 ---------
+ base/strings/string_util.h  | 25 +++++++++++++++++++++++++
+ 2 files changed, 25 insertions(+), 9 deletions(-)
 
+diff --git a/base/strings/string_piece.h b/base/strings/string_piece.h
+index b10707d94e..c1f09606f5 100644
+--- a/base/strings/string_piece.h
++++ b/base/strings/string_piece.h
+@@ -181,15 +181,6 @@ template <typename STRING_TYPE> class BasicStringPiece {
+       : ptr_(str.data()), length_(str.size()) {}
+   constexpr BasicStringPiece(const value_type* offset, size_type len)
+       : ptr_(offset), length_(len) {}
+-  BasicStringPiece(const typename STRING_TYPE::const_iterator& begin,
+-                   const typename STRING_TYPE::const_iterator& end) {
+-    DCHECK(begin <= end) << "StringPiece iterators swapped or invalid.";
+-    length_ = static_cast<size_t>(std::distance(begin, end));
+-
+-    // The length test before assignment is to avoid dereferencing an iterator
+-    // that may point to the end() of a string.
+-    ptr_ = length_ > 0 ? &*begin : nullptr;
+-  }
+ 
+   // data() may return a pointer to a buffer with embedded NULs, and the
+   // returned buffer may or may not be null terminated.  Therefore it is
 diff --git a/base/strings/string_util.h b/base/strings/string_util.h
 index 165ec37c26..d682789ea4 100644
 --- a/base/strings/string_util.h
@@ -47,5 +69,5 @@ index 165ec37c26..d682789ea4 100644
  // so we don't want to use it here.
  template <typename CharT,
 -- 
-2.30.1.766.gb4fecdf3b7-goog
+2.31.0.rc2.261.g7f71774620-goog
 
