@@ -91,7 +91,7 @@ def find_filtered_commit(commit, commits_map):
     return commits_map[look_for]
 
 
-def do_commit(treehash, commithash, meta, commits_map):
+def do_commit(treehash, commithash, meta, commits_map, commit_hash_meta_name):
     """Makes a commit with the given arguments.
 
     This creates a commit on the filtered branch with preserving the original
@@ -111,8 +111,7 @@ def do_commit(treehash, commithash, meta, commits_map):
     for parent in meta.parents:
         parents_parameters.append('-p')
         parents_parameters.append(find_filtered_commit(parent, commits_map))
-    msg = (meta.message + b'\n\n' +
-           filtered_utils.CROS_LIBCHROME_ORIGINAL_COMMIT + b': ' + commithash +
+    msg = (meta.message + b'\n\n' + commit_hash_meta_name + b': ' + commithash +
            b'\n')
     return subprocess.check_output(
         ['git', 'commit-tree'] + parents_parameters + [treehash],
@@ -195,7 +194,8 @@ def check_look_forward(pending_commits, base_commit, base_commit_meta,
 
 
 def process_commits(libchrome_filter, pending_commits, commits_map,
-                    look_forward, progress_callback, commit_callback):
+                    look_forward, commit_hash_meta_name, progress_callback,
+                    commit_callback):
     """Processes new commits in browser repository.
 
     Returns the commit hash of the last commit made.
@@ -264,7 +264,8 @@ def process_commits(libchrome_filter, pending_commits, commits_map,
                 del git_lazytree[f.path]
         treehash_after_diff_applied = git_lazytree.hash()
         filtered_commit = do_commit(treehash_after_diff_applied,
-                                    commit.commit_hash, meta, commits_map)
+                                    commit.commit_hash, meta, commits_map,
+                                    commit_hash_meta_name)
         if commit_callback:
             commit_callback(commit.commit_hash, filtered_commit, meta)
         commits_map[commit.commit_hash] = filtered_commit
@@ -303,6 +304,14 @@ def main():
         type=str,
         help=
         'Path a file which should contain file paths to be checked in each line. This overwrites the default file filtering rules, if given.',
+        nargs='?')
+    parser.add_argument(
+        '--commit_hash_meta_name',
+        metavar='commit_hash_meta_name',
+        type=str,
+        default=filtered_utils.CROS_LIBCHROME_ORIGINAL_COMMIT.decode('utf-8'),
+        help=
+        'Machine-and-people redable metadata key for original commit hash. This overwrites the default value, if given.',
         nargs='?')
 
     parser.add_argument('--dry_run',
@@ -395,6 +404,7 @@ def main():
         # Use look_forward=1000 if filter_files is set.
         # This is used to generate a small sets of newly wanted files.
         1000 if arg.filter_files else None,
+        arg.commit_hash_meta_name.encode('utf-8'),
         # Print progress
         lambda cur_idx, tot_cnt, cur_hash, cur_meta:
         (print('Processing',
