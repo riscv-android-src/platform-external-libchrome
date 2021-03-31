@@ -1,0 +1,7 @@
+Tools here are for developers in libchrome team to use.
+
+It's used to help libchrome team to do each uprev.
+
+Any changes in this directory shouldn't affect actual Chrome OS image directly.
+
+Infra doesn't need to run hwtests or vmtests on changes in this CL.
