@@ -1,9 +1,6 @@
 # This file will be used by emerge in libchrome-XXXX.ebuild to determine the
 # order of applying patches.
 
-# TODO(crbug.com/1184584): Add empty header for use in ap-aogh
-backward-compatibility-message-loop-current-header.patch
-
 # Remove glib dependency.
 # TODO(hidehiko): Fix the config in AOSP libchrome.
 libchrome-Remove-glib-dependency.patch
