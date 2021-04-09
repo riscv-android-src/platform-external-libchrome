@@ -31,3 +31,4 @@ py3.patch
 forward-compatibility-new-header-files.patch
 forward-compatibility-base-MakeStringPiece.patch
 forward-compatibility-FilePathWatcher-Watch-with-enum-type.patch
+forward-compatibility-Add-base-ObserverList-empty.patch

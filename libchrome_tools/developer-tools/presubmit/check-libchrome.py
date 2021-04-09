@@ -24,6 +24,8 @@ BAD_KEYWORDS = {
     'File will be removed, please import base/test/bind.h instead',
     b'include.*mojo\/public\/cpp\/bindings\/binding.h':
     'Old mojo bindings types will be deprecated, please convert to the new one. See closed chromium tracking crbug/955171 for details',
+    b'might_have_observers':
+    'base::ObserverList::might_have_observers will be deprecated, please use !base::ObserverList::empty instead',
 }
 
 
