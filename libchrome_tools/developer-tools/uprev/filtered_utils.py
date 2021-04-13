@@ -13,11 +13,15 @@ import utils
 CROS_LIBCHROME_INITIAL_COMMIT = b'CrOS-Libchrome-History-Initial-Commit'
 # Keyword to identify original commit in Chromium browser repository.
 CROS_LIBCHROME_ORIGINAL_COMMIT = b'CrOS-Libchrome-Original-Commit'
+# Keyword to identify current commit for deleting files or merge add files
+# branch.
+CROS_LIBCHROME_CURRENT_COMMIT = b'CrOS-Libchrome-Current-Commit'
 
 # Stores metadata required for a git commit.
 GitCommitMetadata = collections.namedtuple('GitCommitMetadata', [
     'parents',
     'original_commits',
+    'original_commit_cursor',
     'tree',
     'authorship',
     'title',
@@ -74,15 +78,19 @@ def get_metadata(commit_hash):
     title = ret[0] if ret else None
 
     original_commits = []
+    original_commit_cursor = None
     is_root = False
     for line in ret:
         if line.startswith(CROS_LIBCHROME_ORIGINAL_COMMIT):
             original_commits.append(line.split(b':')[1].strip())
+        if line.startswith(CROS_LIBCHROME_ORIGINAL_COMMIT) or line.startswith(
+                CROS_LIBCHROME_CURRENT_COMMIT):
+            original_commit_cursor = line.split(b':')[1].strip()
         if line == CROS_LIBCHROME_INITIAL_COMMIT:
             is_root = True
     msg = b'\n'.join(ret)
-    return GitCommitMetadata(parents, original_commits, tree_hash, authorship,
-                             title, msg, is_root)
+    return GitCommitMetadata(parents, original_commits, original_commit_cursor,
+                             tree_hash, authorship, title, msg, is_root)
 
 
 def get_commits_map(commit_hash, progress_callback):

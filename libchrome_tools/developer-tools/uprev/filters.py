@@ -38,7 +38,7 @@ class Filter:
         self.keep = keep
         self.keep_excluded = keep_excluded
 
-    def _want_file(self, path):
+    def want_file(self, path):
         """Returns whether the path wants to be a new file."""
         wanted = False
         for want_file_regex in self.want:
@@ -76,7 +76,7 @@ class Filter:
 
         files = []
         for upstream_file in upstream_files:
-            if self._want_file(upstream_file.path):
+            if self.want_file(upstream_file.path):
                 files.append(upstream_file)
         for our_file in our_files:
             if self._keep_file(our_file.path):
@@ -92,7 +92,7 @@ class Filter:
         filtered = []
         for change in diff:
             path = change.file.path
-            if self._want_file(path):
+            if self.want_file(path):
                 assert not self._keep_file(path), path
                 filtered.append(change)
         return filtered
