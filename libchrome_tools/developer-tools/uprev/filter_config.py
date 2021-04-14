@@ -39,6 +39,7 @@ WANT_EXCLUDE = [
     re.compile(rb'(.*/)?OWNERS$'),
     re.compile(rb'(.*/)?SECURITY_OWNERS$'),
     re.compile(rb'(.*/)?DEPS$'),
+    re.compile(rb'base/android/java/src/org/chromium/base/BuildConfig.java'),
     re.compile(rb'base/(.*/)?(ios|win|fuchsia|mac|openbsd|freebsd|nacl)/.*'),
     re.compile(rb'.*_(ios|win|mac|fuchsia|openbsd|freebsd|nacl)[_./]'),
     re.compile(rb'.*/(ios|win|mac|fuchsia|openbsd|freebsd|nacl)_'),

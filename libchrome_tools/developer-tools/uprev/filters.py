@@ -93,6 +93,6 @@ class Filter:
         for change in diff:
             path = change.file.path
             if self._want_file(path):
-                assert not self._keep_file(path)
+                assert not self._keep_file(path), path
                 filtered.append(change)
         return filtered
