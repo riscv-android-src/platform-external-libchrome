@@ -389,6 +389,13 @@ def main():
     print(file=VERBOSE)
     print('loaded commit mapping of', len(commits_map), 'commit', file=INFO)
 
+    # If last_known is not parent_filtered, which means some other commits are
+    # made after last_known, use parent_filtered as HEAD to connect.
+    if last_known and last_known.decode('ascii') != arg.parent_filtered[0]:
+        assert meta_last_known.original_commits[0] in commits_map
+        commits_map[meta_last_known.original_commits[0]] = arg.parent_filtered[
+            0].encode('ascii')
+
     # Process newer commits in browser repository from
     # last_known.original_commits
     print('search for commits to filter', file=INFO)
