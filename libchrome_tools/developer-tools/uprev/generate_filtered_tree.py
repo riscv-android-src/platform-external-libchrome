@@ -53,11 +53,12 @@ def timing(timing_deque, update=True):
 
 
 def get_start_commit_of_browser_tree(parent_filtered):
-    """Returns the last commit committed by the script, and its metadata.
+    """Returns the last commit committed in bytes by the script, and its metadata.
 
     Args:
         parent_filtered: the commit hash of the tip of the filtered branch.
     """
+    assert isinstance(parent_filtered, bytes)
     current = parent_filtered
     while True:
         meta = filtered_utils.get_metadata(current)
@@ -359,7 +360,7 @@ def main():
           arg.parent_filtered[0],
           file=INFO)
     last_known, meta_last_known = get_start_commit_of_browser_tree(
-        arg.parent_filtered[0])
+        arg.parent_filtered[0].encode('utf-8'))
     if last_known:
         print('Continuing from', last_known, meta_last_known, file=INFO)
     else:
@@ -391,7 +392,7 @@ def main():
 
     # If last_known is not parent_filtered, which means some other commits are
     # made after last_known, use parent_filtered as HEAD to connect.
-    if last_known and last_known.decode('ascii') != arg.parent_filtered[0]:
+    if last_known and last_known != arg.parent_filtered[0].encode('utf-8'):
         assert meta_last_known.original_commits[0] in commits_map
         commits_map[meta_last_known.original_commits[0]] = arg.parent_filtered[
             0].encode('ascii')
