@@ -54,6 +54,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_POSIX)
@@ -1259,9 +1260,8 @@ bool LoadFilterFile(const FilePath& file_path,
     }
 
     // Strip comments and whitespace from each line.
-    std::string trimmed_line =
-        TrimWhitespaceASCII(filter_line.substr(0, hash_pos), TRIM_ALL)
-            .as_string();
+    std::string trimmed_line(
+        TrimWhitespaceASCII(filter_line.substr(0, hash_pos), TRIM_ALL));
 
     if (trimmed_line.substr(0, 2) == "//") {
       LOG(ERROR) << "Line " << line_num << " in " << file_path
@@ -1519,7 +1519,7 @@ bool TestLauncher::Init(CommandLine* command_line) {
   results_tracker_.AddGlobalTag("OS_LINUX");
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
   results_tracker_.AddGlobalTag("OS_CHROMEOS");
 #endif
 
@@ -1742,7 +1742,7 @@ std::vector<std::string> TestLauncher::CollectTests() {
 
     // Tests with the name XYZ will cause tests with the name PRE_XYZ to run. We
     // should bucket all of these tests together.
-    if (Hash(prefix_stripped_name) % total_shards_ !=
+    if (PersistentHash(prefix_stripped_name) % total_shards_ !=
         static_cast<uint32_t>(shard_index_)) {
       continue;
     }

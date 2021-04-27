@@ -17,11 +17,11 @@
 #include "base/posix/eintr_wrapper.h"
 #include "build/build_config.h"
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && !defined(OS_NACL)
+// TODO(b/190018559): linux_syscall_support.h is not provided at current libchrome tree.
 // #include "third_party/lss/linux_syscall_support.h"
-#endif
-
-#if !defined(OS_IOS) && !defined(OS_NACL)
+#include <sys/random.h>
+#elif defined(OS_MAC)
 // TODO(crbug.com/995996): Waiting for this header to appear in the iOS SDK.
 // (See below.)
 #include <sys/random.h>

@@ -76,6 +76,18 @@ void CurrentThread::RemoveTaskObserver(TaskObserver* task_observer) {
   current_->RemoveTaskObserver(task_observer);
 }
 
+void CurrentThread::AddTaskTimeObserver(
+    sequence_manager::TaskTimeObserver* task_observer) {
+  DCHECK(current_->IsBoundToCurrentThread());
+  current_->AddTaskTimeObserver(task_observer);
+}
+
+void CurrentThread::RemoveTaskTimeObserver(
+    sequence_manager::TaskTimeObserver* task_observer) {
+  DCHECK(current_->IsBoundToCurrentThread());
+  current_->RemoveTaskTimeObserver(task_observer);
+}
+
 void CurrentThread::SetAddQueueTimeToTasks(bool enable) {
   DCHECK(current_->IsBoundToCurrentThread());
   current_->SetAddQueueTimeToTasks(enable);
@@ -214,11 +226,6 @@ bool CurrentIOThread::RegisterJobObject(HANDLE job,
   return GetMessagePumpForIO()->RegisterJobObject(job, handler);
 }
 
-bool CurrentIOThread::WaitForIOCompletion(DWORD timeout,
-                                          MessagePumpForIO::IOHandler* filter) {
-  DCHECK(current_->IsBoundToCurrentThread());
-  return GetMessagePumpForIO()->WaitForIOCompletion(timeout, filter);
-}
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 bool CurrentIOThread::WatchFileDescriptor(
     int fd,

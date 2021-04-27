@@ -89,7 +89,8 @@ class BASE_EXPORT ThreadControllerWithMessagePumpImpl
       const SequenceManager::Settings& settings);
 
   // MessagePump::Delegate implementation.
-  void BeforeDoInternalWork() override;
+  void OnBeginNativeWork() override;
+  void OnEndNativeWork() override;
   void BeforeWait() override;
   MessagePump::Delegate::NextWorkInfo DoWork() override;
   bool DoIdleWork() override;
@@ -117,7 +118,8 @@ class BASE_EXPORT ThreadControllerWithMessagePumpImpl
     // Number of tasks processed in a single DoWork invocation.
     int work_batch_size = 1;
 
-    int runloop_count = 0;
+    // Tracks the number and state of each run-level managed by this instance.
+    RunLevelTracker run_level_tracker;
 
     // When the next scheduled delayed work should run, if any.
     TimeTicks next_delayed_do_work = TimeTicks::Max();
@@ -179,11 +181,6 @@ class BASE_EXPORT ThreadControllerWithMessagePumpImpl
   std::unique_ptr<MessagePump> pump_;
 
   TaskAnnotator task_annotator_;
-
-#if DCHECK_IS_ON()
-  const bool log_runloop_quit_and_quit_when_idle_;
-  bool quit_when_idle_requested_ = false;
-#endif
 
   const TickClock* time_source_;  // Not owned.
 

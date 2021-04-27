@@ -289,35 +289,28 @@ TEST(STLUtilTest, AsConst) {
                 "Error: base::as_const() returns an unexpected type");
 }
 
-TEST(STLUtilTest, Invoke) {
-  struct S {
-    int i;
-    constexpr int add(int x) const { return i + x; }
+TEST(STLUtilTest, ToUnderlying) {
+  enum Enum : int {
+    kOne = 1,
+    kTwo = 2,
   };
 
-  constexpr S s = {1};
+  enum class ScopedEnum : char {
+    kOne = 1,
+    kTwo = 2,
+  };
 
-  // Note: The tests involving a std::reference_wrapper are not static_asserts,
-  // since std::reference_wrapper is not constexpr prior to C++20.
-  static_assert(invoke(&S::add, s, 2) == 3, "");
-  EXPECT_EQ(invoke(&S::add, std::ref(s), 2), 3);
-  static_assert(invoke(&S::add, &s, 3) == 4, "");
+  static_assert(std::is_same<decltype(to_underlying(kOne)), int>::value, "");
+  static_assert(std::is_same<decltype(to_underlying(kTwo)), int>::value, "");
+  static_assert(to_underlying(kOne) == 1, "");
+  static_assert(to_underlying(kTwo) == 2, "");
 
-  static_assert(invoke(&S::i, s) == 1, "");
-  EXPECT_EQ(invoke(&S::i, std::ref(s)), 1);
-  static_assert(invoke(&S::i, &s) == 1, "");
-
-  static_assert(invoke(std::plus<>(), 1, 2) == 3, "");
-}
-
-TEST(STLUtilTest, Identity) {
-  static constexpr identity id;
-
-  std::vector<int> v;
-  EXPECT_EQ(&v, &id(v));
-
-  constexpr int arr = {0};
-  static_assert(arr == id(arr), "");
+  static_assert(
+      std::is_same<decltype(to_underlying(ScopedEnum::kOne)), char>::value, "");
+  static_assert(
+      std::is_same<decltype(to_underlying(ScopedEnum::kTwo)), char>::value, "");
+  static_assert(to_underlying(ScopedEnum::kOne) == 1, "");
+  static_assert(to_underlying(ScopedEnum::kTwo) == 2, "");
 }
 
 TEST(STLUtilTest, GetUnderlyingContainer) {
@@ -381,43 +374,6 @@ TEST(STLUtilTest, ConstCastIterator) {
   // Unordered Associative Containers
   RunConstCastIteratorTest<std::unordered_set<int>>();
   RunConstCastIteratorTest<std::unordered_multiset<int>>();
-}
-
-TEST(STLUtilTest, STLIsSorted) {
-  {
-    std::set<int> set;
-    set.insert(24);
-    set.insert(1);
-    set.insert(12);
-    EXPECT_TRUE(STLIsSorted(set));
-  }
-
-  {
-    std::set<ComparableValue> set;
-    set.insert(ComparableValue(24));
-    set.insert(ComparableValue(1));
-    set.insert(ComparableValue(12));
-    EXPECT_TRUE(STLIsSorted(set));
-  }
-
-  {
-    std::vector<int> vector;
-    vector.push_back(1);
-    vector.push_back(1);
-    vector.push_back(4);
-    vector.push_back(64);
-    vector.push_back(12432);
-    EXPECT_TRUE(STLIsSorted(vector));
-    vector.back() = 1;
-    EXPECT_FALSE(STLIsSorted(vector));
-  }
-
-  {
-    int array[] = {1, 1, 4, 64, 12432};
-    EXPECT_TRUE(STLIsSorted(array));
-    array[4] = 1;
-    EXPECT_FALSE(STLIsSorted(array));
-  }
 }
 
 TEST(STLUtilTest, STLSetDifference) {
@@ -571,30 +527,6 @@ TEST(STLUtilTest, STLSetIntersection) {
   }
 }
 
-TEST(STLUtilTest, STLIncludes) {
-  std::set<int> a1;
-  a1.insert(1);
-  a1.insert(2);
-  a1.insert(3);
-  a1.insert(4);
-
-  std::set<int> a2;
-  a2.insert(3);
-  a2.insert(4);
-
-  std::set<int> a3;
-  a3.insert(3);
-  a3.insert(4);
-  a3.insert(5);
-
-  EXPECT_TRUE(STLIncludes<std::set<int> >(a1, a2));
-  EXPECT_FALSE(STLIncludes<std::set<int> >(a1, a3));
-  EXPECT_FALSE(STLIncludes<std::set<int> >(a2, a1));
-  EXPECT_FALSE(STLIncludes<std::set<int> >(a2, a3));
-  EXPECT_FALSE(STLIncludes<std::set<int> >(a3, a1));
-  EXPECT_TRUE(STLIncludes<std::set<int> >(a3, a2));
-}
-
 TEST(Erase, String) {
   const std::pair<std::string, std::string> test_data[] = {
       {"", ""}, {"abc", "bc"}, {"abca", "bc"},
@@ -695,41 +627,6 @@ TEST(Erase, IsNotIn) {
   std::vector<int> expected = {2, 2, 4, 6};
   EXPECT_EQ(5u, EraseIf(lhs, IsNotIn<std::vector<int>>(rhs)));
   EXPECT_EQ(expected, lhs);
-}
-
-TEST(STLUtilTest, GenericContains) {
-  const char allowed_chars[] = {'a', 'b', 'c', 'd'};
-
-  EXPECT_TRUE(Contains(allowed_chars, 'a'));
-  EXPECT_FALSE(Contains(allowed_chars, 'z'));
-  EXPECT_FALSE(Contains(allowed_chars, 0));
-
-  const char allowed_chars_including_nul[] = "abcd";
-  EXPECT_TRUE(Contains(allowed_chars_including_nul, 0));
-}
-
-TEST(STLUtilTest, ContainsWithFindAndNpos) {
-  std::string str = "abcd";
-
-  EXPECT_TRUE(Contains(str, 'a'));
-  EXPECT_FALSE(Contains(str, 'z'));
-  EXPECT_FALSE(Contains(str, 0));
-}
-
-TEST(STLUtilTest, ContainsWithFindAndEnd) {
-  std::set<int> set = {1, 2, 3, 4};
-
-  EXPECT_TRUE(Contains(set, 1));
-  EXPECT_FALSE(Contains(set, 5));
-  EXPECT_FALSE(Contains(set, 0));
-}
-
-TEST(STLUtilTest, ContainsWithContains) {
-  flat_set<int> set = {1, 2, 3, 4};
-
-  EXPECT_TRUE(Contains(set, 1));
-  EXPECT_FALSE(Contains(set, 5));
-  EXPECT_FALSE(Contains(set, 0));
 }
 
 TEST(STLUtilTest, InsertOrAssign) {
@@ -837,17 +734,6 @@ TEST(STLUtilTest, OptionalOrNullptr) {
   optional = 0.1f;
   EXPECT_EQ(&optional.value(), base::OptionalOrNullptr(optional));
   EXPECT_NE(nullptr, base::OptionalOrNullptr(optional));
-}
-
-TEST(STLUtilTest, STLIsSortedConstexpr) {
-  constexpr int kArrayAscending[] = {1, 2, 3, 4};
-  static_assert(base::STLIsSorted(kArrayAscending), "");
-
-  constexpr int kArrayDescending[] = {4, 3, 2, 1};
-  static_assert(!base::STLIsSorted(kArrayDescending), "");
-
-  constexpr int kArrayEqual[] = {1, 1, 1, 1};
-  static_assert(base::STLIsSorted(kArrayEqual), "");
 }
 
 }  // namespace

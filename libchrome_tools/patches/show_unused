@@ -6,4 +6,4 @@
 # ./show_unused
 # Print unused patches
 cd "$(dirname "$0")"
-for i in *.patch; do grep "^$i" patches >/dev/null || echo $i; done
+for i in *.patch; do grep "$i" patches >/dev/null || echo $i; done

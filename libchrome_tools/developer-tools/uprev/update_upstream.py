@@ -32,7 +32,7 @@ CROS_LIBCHROME_RECOVERED_FROM_COMMIT = b'CrOS-Libchrome-Recovered-From-Commit'
 INITIAL_COMMIT = 'ba8bd83211d4bbca7a48793d567b06d5d4451005'
 
 
-def verify(current):
+def verify_tree(current):
     """ Verifies current commit has the filtered files matching filter_config.
 
     Returns True if if's correct, False otherwise.
@@ -50,6 +50,21 @@ def verify(current):
             expected_tree[f.path] = f
 
     return expected_tree.hash() == current_metadata.tree
+
+
+def verify_author(current):
+    """ Verifies current commit has the same authorship as original commit.
+
+    Returns True if if's correct, False otherwise.
+
+    Args:
+        current: current cros/upstream commit hash.
+    """
+    current_metadata = filtered_utils.get_metadata(current)
+    original_commit = current_metadata.original_commit_cursor
+    original_metadata = filtered_utils.get_metadata(original_commit)
+
+    return current_metadata.authorship == original_metadata.authorship
 
 
 def delete(current):
@@ -114,7 +129,6 @@ def add(current):
         GENERATED_FILTERED_TREE,
         INITIAL_COMMIT,
         original_commit,
-        '--verbose',
         '--commit_hash_meta_name',
         CROS_LIBCHROME_RECOVERED_FROM_COMMIT,
         '--filter_files',
@@ -155,7 +169,6 @@ def forward(current, target):
         GENERATED_FILTERED_TREE,
         current,
         target,
-        '--verbose',
     ],
                           stdout=subprocess.PIPE)
     assert proc.returncode == 0
@@ -216,9 +229,17 @@ def main():
         current = add(current)
 
     if args.all or args.forward:
-        assert verify(
+        assert verify_tree(
             current), 'Files must be correctly filtered before forward stage'
+        pre_forward = current
         current = forward(current, target)
+        if current != pre_forward:
+            assert verify_tree(
+                current), 'Files must be correctly filtered after forward stage'
+            # Verify the last commit authorship, to ensure forward process
+            # correctly passed environment variables to git (especially if via
+            # Chromium Infra git wrapper)
+            assert verify_author(current), 'Commit must have original author'
 
     print(current)
 

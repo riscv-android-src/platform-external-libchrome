@@ -10,12 +10,11 @@
 #include <limits>
 #include <memory>
 #include <queue>
+#include <string>
 
 #include "base/atomicops.h"
 #include "base/base_export.h"
 #include "base/callback_forward.h"
-#include "base/macros.h"
-#include "base/metrics/histogram_base.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_piece.h"
 #include "base/synchronization/waitable_event.h"
@@ -52,10 +51,9 @@ enum class CanRunPolicy {
 // and records metrics and trace events. This class is thread-safe.
 class BASE_EXPORT TaskTracker {
  public:
-  // |histogram_label| is used to label histograms. No histograms are recorded
-  // if it is empty.
-  TaskTracker(StringPiece histogram_label);
-
+  TaskTracker();
+  TaskTracker(const TaskTracker&) = delete;
+  TaskTracker& operator=(const TaskTracker&) = delete;
   virtual ~TaskTracker();
 
   // Initiates shutdown. Once this is called, only BLOCK_SHUTDOWN tasks will
@@ -130,13 +128,6 @@ class BASE_EXPORT TaskTracker {
   // no tasks are blocking shutdown).
   bool IsShutdownComplete() const;
 
-  // Records Now() - posted_time to
-  // ThreadPool.[label].HeartbeatLatencyMicroseconds.[suffix].
-  // [label] is the histogram label provided to the constructor.
-  // [suffix] is derived from |task_priority|.
-  void RecordHeartbeatLatencyHistogram(TaskPriority task_priority,
-                                       TimeTicks posted_time) const;
-
   TrackedRef<TaskTracker> GetTrackedRef() {
     return tracked_ref_factory_.GetTrackedRef();
   }
@@ -155,6 +146,10 @@ class BASE_EXPORT TaskTracker {
   virtual void RunTask(Task task,
                        TaskSource* task_source,
                        const TaskTraits& traits);
+
+  // Allow a subclass to wait more interactively for any running shutdown tasks
+  // before blocking the thread.
+  virtual void BeginCompleteShutdown(base::WaitableEvent& shutdown_event);
 
  private:
   friend class RegisteredTaskSource;
@@ -192,11 +187,6 @@ class BASE_EXPORT TaskTracker {
   // Calls |flush_callback_for_testing_| if one is available in a lock-safe
   // manner.
   void CallFlushCallbackForTesting();
-
-  // Records |Now() - posted_time| to the
-  // ThreadPool.TaskLatencyMicroseconds.[label].[priority] histogram.
-  void RecordLatencyHistogram(TaskPriority priority,
-                              TimeTicks posted_time) const;
 
   // Dummy frames to allow identification of shutdown behavior in a stack trace.
   void RunContinueOnShutdown(Task* task);
@@ -253,24 +243,10 @@ class BASE_EXPORT TaskTracker {
   // completes.
   std::unique_ptr<WaitableEvent> shutdown_event_ GUARDED_BY(shutdown_lock_);
 
-  // ThreadPool.TaskLatencyMicroseconds.*,
-  // ThreadPool.HeartbeatLatencyMicroseconds.*, and
-  // ThreadPool.NumTasksRunWhileQueuing.* histograms. The index is a
-  // TaskPriority. Intentionally leaked.
-  // TODO(scheduler-dev): Consider using STATIC_HISTOGRAM_POINTER_GROUP for
-  // these.
-  using TaskPriorityType = std::underlying_type<TaskPriority>::type;
-  static constexpr TaskPriorityType kNumTaskPriorities =
-      static_cast<TaskPriorityType>(TaskPriority::HIGHEST) + 1;
-  HistogramBase* const task_latency_histograms_[kNumTaskPriorities];
-  HistogramBase* const heartbeat_latency_histograms_[kNumTaskPriorities];
-
   // Ensures all state (e.g. dangling cleaned up workers) is coalesced before
   // destroying the TaskTracker (e.g. in test environments).
   // Ref. https://crbug.com/827615.
   TrackedRefFactory<TaskTracker> tracked_ref_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(TaskTracker);
 };
 
 }  // namespace internal

@@ -204,6 +204,76 @@ TEST_F(CallbackTest, ThenResetsOriginalCallback) {
   }
 }
 
+// A RepeatingCallback will implicitly convert to a OnceCallback, so a
+// once_callback.Then(repeating_callback) should turn into a OnceCallback
+// that holds 2 OnceCallbacks which it will run.
+TEST_F(CallbackTest, ThenCanConvertRepeatingToOnce) {
+  {
+    RepeatingClosure repeating_closure = base::BindRepeating([]() {});
+    OnceClosure once_closure = base::BindOnce([]() {});
+    std::move(once_closure).Then(repeating_closure).Run();
+
+    RepeatingCallback<int(int)> repeating_callback =
+        base::BindRepeating([](int i) { return i + 1; });
+    OnceCallback<int(int)> once_callback =
+        base::BindOnce([](int i) { return i * 2; });
+    EXPECT_EQ(3, std::move(once_callback).Then(repeating_callback).Run(1));
+  }
+  {
+    RepeatingClosure repeating_closure = base::BindRepeating([]() {});
+    OnceClosure once_closure = base::BindOnce([]() {});
+    std::move(once_closure).Then(std::move(repeating_closure)).Run();
+
+    RepeatingCallback<int(int)> repeating_callback =
+        base::BindRepeating([](int i) { return i + 1; });
+    OnceCallback<int(int)> once_callback =
+        base::BindOnce([](int i) { return i * 2; });
+    EXPECT_EQ(
+        3, std::move(once_callback).Then(std::move(repeating_callback)).Run(1));
+  }
+}
+
+// `Then()` should should allow a return value of type `R` to be passed to a
+// callback with one parameter of type `const R&` or type `R&&`.
+TEST_F(CallbackTest, ThenWithCompatibleButNotSameType) {
+  {
+    OnceCallback<std::string()> once_callback =
+        BindOnce([] { return std::string("hello"); });
+    EXPECT_EQ("hello",
+              std::move(once_callback)
+                  .Then(BindOnce([](const std::string& s) { return s; }))
+                  .Run());
+  }
+
+  class NotCopied {
+   public:
+    NotCopied() = default;
+    NotCopied(NotCopied&&) = default;
+    NotCopied& operator=(NotCopied&&) = default;
+
+    NotCopied(const NotCopied&) {
+      ADD_FAILURE() << "should not have been copied";
+    }
+
+    NotCopied& operator=(const NotCopied&) {
+      ADD_FAILURE() << "should not have been copied";
+      return *this;
+    }
+  };
+
+  {
+    OnceCallback<NotCopied()> once_callback =
+        BindOnce([] { return NotCopied(); });
+    std::move(once_callback).Then(BindOnce([](const NotCopied&) {})).Run();
+  }
+
+  {
+    OnceCallback<NotCopied()> once_callback =
+        BindOnce([] { return NotCopied(); });
+    std::move(once_callback).Then(BindOnce([](NotCopied&&) {})).Run();
+  }
+}
+
 // A factory class for building an outer and inner callback for calling
 // Then() on either a OnceCallback or RepeatingCallback with combinations of
 // void return types, non-void, and move-only return types.
