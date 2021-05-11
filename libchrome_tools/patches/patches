@@ -21,6 +21,9 @@ revert-crbug-1001171.patch
 # CHECK* not implitly included by base/logging.h
 backward-compatibility-check.patch
 
+# Cherry-pick of r829887 with BUILD.gn updates
+Clean-up-ScopedSetRunningOnChromeOSForTesting.patch
+
 # Cherry-pick from r833197 for -Wc++11-narrowing
 explicit-cast-from-char-to-unsigned-type.patch
 

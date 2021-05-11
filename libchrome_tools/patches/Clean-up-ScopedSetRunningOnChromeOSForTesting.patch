@@ -1,0 +1,283 @@
+From 6ca4a5653dfe7c90efcfa708d5bce7268baeb3a2 Mon Sep 17 00:00:00 2001
+From: James Cook <jamescook@chromium.org>
+Date: Sat, 21 Nov 2020 09:43:39 +0900
+Subject: [PATCH] Clean up ScopedSetRunningOnChromeOSForTesting and move to
+ //base/test
+
+Some code has behavior differences when run on real Chrome OS hardware
+versus in the linux "emulator". That code uses
+base::SysInfo::IsRunningOnChromeOS() to check where it is running.
+Tests override this with
+base::SysInfo::SysInfo::SetChromeOSVersionInfoForTest().
+
+For tests, we provide chromeos::ScopedIsRunningOnChromeOSForTest.
+However, this lives in //chrome/browser/chromeos/ and can't be used by
+Lacros (go/lacros). //c/b/chromeos is actually ash-specific code, and
+will be renamed to //c/b/ash shortly. To work around this, some tests
+have rolled their own scoped helper classes.
+
+We need test helpers that can be shared across ash-chrome and
+lacros-chrome. Since these test helpers are overriding the behavior of
+base::SysInfo, I think it should live in //base/test.
+
+Split the class into two parts, one to handle the common case of just
+overriding IsRunningOnChromeOS and another to override the version
+info.
+
+Also, use the helpers in a few more places for tests that were not
+resetting the Chrome OS version when they were done (a potential
+source of flake for subsequent unit tests).
+
+Bug: 1148904
+Test: existing unit_tests
+Change-Id: I1442e54155c008e6447cd147f23a1dfd5ebfbb97
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/2538285
+Reviewed-by: Scott Violet <sky@chromium.org>
+Reviewed-by: kylechar <kylechar@chromium.org>
+Reviewed-by: Hidehiko Abe <hidehiko@chromium.org>
+Commit-Queue: James Cook <jamescook@chromium.org>
+Cr-Commit-Position: refs/heads/master@{#829887}
+
+CrOS-Libchrome-Original-Commit: 208321c029c845862f3c571fb44aa2ece1d9e5e9
+Change-Id: I95b0e7d0603bc6f26e909993310e7f01207b113f
+---
+ BUILD.gn                                  |  2 ++
+ base/system/sys_info.h                    |  6 ++++-
+ base/system/sys_info_chromeos.cc          | 25 +++++++++++++----
+ base/test/scoped_chromeos_version_info.cc | 23 ++++++++++++++++
+ base/test/scoped_chromeos_version_info.h  | 33 +++++++++++++++++++++++
+ base/test/scoped_running_on_chromeos.cc   | 31 +++++++++++++++++++++
+ base/test/scoped_running_on_chromeos.h    | 25 +++++++++++++++++
+ 7 files changed, 139 insertions(+), 6 deletions(-)
+ create mode 100644 base/test/scoped_chromeos_version_info.cc
+ create mode 100644 base/test/scoped_chromeos_version_info.h
+ create mode 100644 base/test/scoped_running_on_chromeos.cc
+ create mode 100644 base/test/scoped_running_on_chromeos.h
+
+diff --git a/BUILD.gn b/BUILD.gn
+index 402ed4c725..14ce6ec3f7 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -394,6 +394,8 @@ libbase_sublibs = [
+     testonly = true
+     sources = [
+       "base/test/bind_test_util.cc",
++      "base/test/scoped_chromeos_version_info.cc",
++      "base/test/scoped_running_on_chromeos.cc",
+       "base/test/scoped_run_loop_timeout.cc",
+       "base/test/simple_test_clock.cc",
+       "base/test/simple_test_tick_clock.cc",
+diff --git a/base/system/sys_info.h b/base/system/sys_info.h
+index eee730e734..aab0b77b03 100644
+--- a/base/system/sys_info.h
++++ b/base/system/sys_info.h
+@@ -155,10 +155,14 @@ class BASE_EXPORT SysInfo {
+   // Returns true when actually running in a Chrome OS environment.
+   static bool IsRunningOnChromeOS();
+ 
+-  // Test method to force re-parsing of lsb-release.
++  // Overrides |lsb_release| and |lsb_release_time|. Overrides cannot be nested.
++  // Call ResetChromeOSVersionInfoForTest() to restore the previous values.
+   static void SetChromeOSVersionInfoForTest(const std::string& lsb_release,
+                                             const Time& lsb_release_time);
+ 
++  // Undoes the function above.
++  static void ResetChromeOSVersionInfoForTest();
++
+   // Returns the kernel version of the host operating system.
+   static std::string KernelVersion();
+ 
+diff --git a/base/system/sys_info_chromeos.cc b/base/system/sys_info_chromeos.cc
+index e8d2b4872c..aefbb33dd8 100644
+--- a/base/system/sys_info_chromeos.cc
++++ b/base/system/sys_info_chromeos.cc
+@@ -12,7 +12,7 @@
+ #include "base/files/file.h"
+ #include "base/files/file_path.h"
+ #include "base/files/file_util.h"
+-#include "base/lazy_instance.h"
++#include "base/no_destructor.h"
+ #include "base/notreached.h"
+ #include "base/stl_util.h"
+ #include "base/strings/string_number_conversions.h"
+@@ -156,11 +156,18 @@ class ChromeOSVersionInfo {
+   bool is_running_on_chromeos_;
+ };
+ 
+-static LazyInstance<ChromeOSVersionInfo>::Leaky g_chrome_os_version_info =
+-    LAZY_INSTANCE_INITIALIZER;
++bool g_use_chromeos_version_info_for_test = false;
+ 
+ ChromeOSVersionInfo& GetChromeOSVersionInfo() {
+-  return g_chrome_os_version_info.Get();
++  // ChromeOSVersionInfo only stores the parsed lsb-release values. We use a
++  // second instance for overrides in tests so we can cleanly restore the
++  // original lsb-release.
++  if (g_use_chromeos_version_info_for_test) {
++    static base::NoDestructor<ChromeOSVersionInfo> version_info_for_test;
++    return *version_info_for_test;
++  }
++  static base::NoDestructor<ChromeOSVersionInfo> version_info;
++  return *version_info;
+ }
+ 
+ }  // namespace
+@@ -229,10 +236,18 @@ bool SysInfo::IsRunningOnChromeOS() {
+ // static
+ void SysInfo::SetChromeOSVersionInfoForTest(const std::string& lsb_release,
+                                             const Time& lsb_release_time) {
++  DCHECK(!g_use_chromeos_version_info_for_test) << "Nesting is not allowed";
++  g_use_chromeos_version_info_for_test = true;
+   std::unique_ptr<Environment> env(Environment::Create());
+   env->SetVar(kLsbReleaseKey, lsb_release);
+   env->SetVar(kLsbReleaseTimeKey, NumberToString(lsb_release_time.ToDoubleT()));
+-  g_chrome_os_version_info.Get().Parse();
++  GetChromeOSVersionInfo().Parse();
++}
++
++// static
++void SysInfo::ResetChromeOSVersionInfoForTest() {
++  DCHECK(g_use_chromeos_version_info_for_test);
++  g_use_chromeos_version_info_for_test = false;
+ }
+ 
+ // static
+diff --git a/base/test/scoped_chromeos_version_info.cc b/base/test/scoped_chromeos_version_info.cc
+new file mode 100644
+index 0000000000..35ef9faf7a
+--- /dev/null
++++ b/base/test/scoped_chromeos_version_info.cc
+@@ -0,0 +1,23 @@
++// Copyright 2020 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/test/scoped_chromeos_version_info.h"
++
++#include "base/system/sys_info.h"
++
++namespace base {
++namespace test {
++
++ScopedChromeOSVersionInfo::ScopedChromeOSVersionInfo(StringPiece lsb_release,
++                                                     Time lsb_release_time) {
++  SysInfo::SetChromeOSVersionInfoForTest(lsb_release.as_string(),
++                                         lsb_release_time);
++}
++
++ScopedChromeOSVersionInfo::~ScopedChromeOSVersionInfo() {
++  SysInfo::ResetChromeOSVersionInfoForTest();
++}
++
++}  // namespace test
++}  // namespace base
+diff --git a/base/test/scoped_chromeos_version_info.h b/base/test/scoped_chromeos_version_info.h
+new file mode 100644
+index 0000000000..c392c38404
+--- /dev/null
++++ b/base/test/scoped_chromeos_version_info.h
+@@ -0,0 +1,33 @@
++// Copyright 2020 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_TEST_SCOPED_CHROMEOS_VERSION_INFO_H_
++#define BASE_TEST_SCOPED_CHROMEOS_VERSION_INFO_H_
++
++#include "base/strings/string_piece.h"
++#include "base/time/time.h"
++
++namespace base {
++namespace test {
++
++// Test helper that temporarily overrides the cached lsb-release data.
++// NOTE: Must be created on the main thread before any other threads are
++// started. Cannot be nested.
++class ScopedChromeOSVersionInfo {
++ public:
++  // Overrides |lsb_release| and |lsb_release_time|. For example, can be used to
++  // simulate a specific OS version. Note that |lsb_release| must contain
++  // CHROMEOS_RELEASE_NAME to make base::SysInfo::IsRunningOnChromeOS() return
++  // true.
++  ScopedChromeOSVersionInfo(StringPiece lsb_release, Time lsb_release_time);
++  ScopedChromeOSVersionInfo(const ScopedChromeOSVersionInfo&) = delete;
++  ScopedChromeOSVersionInfo& operator=(const ScopedChromeOSVersionInfo&) =
++      delete;
++  ~ScopedChromeOSVersionInfo();
++};
++
++}  // namespace test
++}  // namespace base
++
++#endif  //  BASE_TEST_SCOPED_CHROMEOS_VERSION_INFO_H_
+diff --git a/base/test/scoped_running_on_chromeos.cc b/base/test/scoped_running_on_chromeos.cc
+new file mode 100644
+index 0000000000..d171d23b77
+--- /dev/null
++++ b/base/test/scoped_running_on_chromeos.cc
+@@ -0,0 +1,31 @@
++// Copyright 2020 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "base/test/scoped_running_on_chromeos.h"
++
++#include "base/system/sys_info.h"
++#include "base/time/time.h"
++
++namespace base {
++namespace test {
++namespace {
++
++// Chrome OS /etc/lsb-release values that make SysInfo::IsRunningOnChromeOS()
++// return true.
++const char kLsbRelease[] =
++    "CHROMEOS_RELEASE_NAME=Chrome OS\n"
++    "CHROMEOS_RELEASE_VERSION=1.2.3.4\n";
++
++}  // namespace
++
++ScopedRunningOnChromeOS::ScopedRunningOnChromeOS() {
++  SysInfo::SetChromeOSVersionInfoForTest(kLsbRelease, Time());
++}
++
++ScopedRunningOnChromeOS::~ScopedRunningOnChromeOS() {
++  SysInfo::ResetChromeOSVersionInfoForTest();
++}
++
++}  // namespace test
++}  // namespace base
+diff --git a/base/test/scoped_running_on_chromeos.h b/base/test/scoped_running_on_chromeos.h
+new file mode 100644
+index 0000000000..1b4da3847c
+--- /dev/null
++++ b/base/test/scoped_running_on_chromeos.h
+@@ -0,0 +1,25 @@
++// Copyright 2020 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef BASE_TEST_SCOPED_RUNNING_ON_CHROMEOS_H_
++#define BASE_TEST_SCOPED_RUNNING_ON_CHROMEOS_H_
++
++namespace base {
++namespace test {
++
++// Test helper that forces base::SysInfo::IsRunningOnChromeOS() to return true.
++// NOTE: Must be created on the main thread before any other threads are
++// started. Cannot be nested.
++class ScopedRunningOnChromeOS {
++ public:
++  ScopedRunningOnChromeOS();
++  ScopedRunningOnChromeOS(const ScopedRunningOnChromeOS&) = delete;
++  ScopedRunningOnChromeOS& operator=(const ScopedRunningOnChromeOS&) = delete;
++  ~ScopedRunningOnChromeOS();
++};
++
++}  // namespace test
++}  // namespace base
++
++#endif  //  BASE_TEST_SCOPED_RUNNING_ON_CHROMEOS_H_
+-- 
+2.31.1.607.g51e8a6a459-goog
+
