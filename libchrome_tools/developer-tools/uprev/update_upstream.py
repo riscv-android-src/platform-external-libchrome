@@ -129,7 +129,6 @@ def add(current):
         GENERATED_FILTERED_TREE,
         INITIAL_COMMIT,
         original_commit,
-        '--verbose',
         '--commit_hash_meta_name',
         CROS_LIBCHROME_RECOVERED_FROM_COMMIT,
         '--filter_files',
@@ -170,7 +169,6 @@ def forward(current, target):
         GENERATED_FILTERED_TREE,
         current,
         target,
-        '--verbose',
     ],
                           stdout=subprocess.PIPE)
     assert proc.returncode == 0
