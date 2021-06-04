@@ -8,10 +8,7 @@ import re
 # Libchrome wants WANT but mot WANT_EXCLUDE
 # aka files matching WANT will be copied from upstream_files
 WANT = [
-    re.compile(rb'base/((?!(allocator|third_party)/).*$)'),
-    re.compile(
-        rb'base/allocator/(allocator_shim.cc|allocator_shim_override_linker_wrapped_symbols.h|allocator_shim_override_cpp_symbols.h|allocator_shim_override_libc_symbols.h|allocator_shim_default_dispatch_to_glibc.cc|allocator_shim.h|allocator_shim_default_dispatch_to_linker_wrapped_symbols.cc|allocator_extension.cc|allocator_extension.h|allocator_shim_internals.h)$'
-    ),
+    re.compile(rb'base/((?!(third_party)/).*$)'),
     re.compile(rb'base/third_party/(dynamic_annotation|icu|nspr|valgrind)'),
     re.compile(
         rb'build/(android/(gyp/util|pylib/([^/]*$|constants))|[^/]*\.(h|py)$)'),
