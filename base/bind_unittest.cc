@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/gtest_util.h"
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -832,8 +832,9 @@ struct RepeatingTestConfig {
   using ClosureType = RepeatingClosure;
 
   template <typename F, typename... Args>
-  static CallbackType<MakeUnboundRunType<F, Args...>>
-  Bind(F&& f, Args&&... args) {
+  static CallbackType<internal::MakeUnboundRunType<F, Args...>> Bind(
+      F&& f,
+      Args&&... args) {
     return BindRepeating(std::forward<F>(f), std::forward<Args>(args)...);
   }
 };
@@ -844,8 +845,9 @@ struct OnceTestConfig {
   using ClosureType = OnceClosure;
 
   template <typename F, typename... Args>
-  static CallbackType<MakeUnboundRunType<F, Args...>>
-  Bind(F&& f, Args&&... args) {
+  static CallbackType<internal::MakeUnboundRunType<F, Args...>> Bind(
+      F&& f,
+      Args&&... args) {
     return BindOnce(std::forward<F>(f), std::forward<Args>(args)...);
   }
 };
@@ -1560,13 +1562,6 @@ TEST_F(BindTest, UnwrapUnretained) {
   auto unretained = Unretained(&i);
   EXPECT_EQ(&i, internal::Unwrap(unretained));
   EXPECT_EQ(&i, internal::Unwrap(std::move(unretained)));
-}
-
-TEST_F(BindTest, UnwrapConstRef) {
-  int p = 0;
-  auto const_ref = std::cref(p);
-  EXPECT_EQ(&p, &internal::Unwrap(const_ref));
-  EXPECT_EQ(&p, &internal::Unwrap(std::move(const_ref)));
 }
 
 TEST_F(BindTest, UnwrapRetainedRef) {

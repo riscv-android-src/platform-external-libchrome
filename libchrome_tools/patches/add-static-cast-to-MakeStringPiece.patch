@@ -1,0 +1,32 @@
+From 10154410688000004e0ad5c74ebac1c9a4c725f8 Mon Sep 17 00:00:00 2001
+From: hscham <hscham@chromium.org>
+Date: Mon, 1 Mar 2021 18:15:10 +0900
+Subject: [PATCH] [base] Add static cast to MakeStringPiece
+
+This is used (via libchrome) in Chrome OS programs which uses
+-Wc++11-narrowing.
+
+BUG=chromium:1179608
+TEST=autoninja -C out/Default chrome
+---
+ base/strings/string_util.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/base/strings/string_util.h b/base/strings/string_util.h
+index 9fe80ccb0836..0f98aeb490ce 100644
+--- a/base/strings/string_util.h
++++ b/base/strings/string_util.h
+@@ -89,7 +89,9 @@ BASE_EXPORT bool IsWprintfFormatPortable(const wchar_t* format);
+ template <typename StringT, typename Iter>
+ constexpr BasicStringPiece<StringT> MakeBasicStringPiece(Iter begin, Iter end) {
+   DCHECK_GE(end - begin, 0);
+-  return {base::to_address(begin), end - begin};
++  return {
++      base::to_address(begin),
++      static_cast<size_t>(end - begin)};
+ }
+ 
+ // Explicit instantiations of MakeBasicStringPiece for the BasicStringPiece
+-- 
+2.30.1.766.gb4fecdf3b7-goog
+

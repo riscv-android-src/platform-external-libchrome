@@ -13,7 +13,7 @@
 #include "base/atomicops.h"
 #include "base/auto_reset.h"
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/containers/stack_container.h"
 #include "base/feature_list.h"
@@ -24,6 +24,7 @@
 #include "base/optional.h"
 #include "base/ranges/algorithm.h"
 #include "base/sequence_token.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/task_traits.h"
@@ -96,8 +97,10 @@ bool ContainsWorker(const std::vector<scoped_refptr<WorkerThread>>& workers,
 class ThreadGroupImpl::ScopedCommandsExecutor
     : public ThreadGroup::BaseScopedCommandsExecutor {
  public:
-  ScopedCommandsExecutor(ThreadGroupImpl* outer) : outer_(outer) {}
+  explicit ScopedCommandsExecutor(ThreadGroupImpl* outer) : outer_(outer) {}
 
+  ScopedCommandsExecutor(const ScopedCommandsExecutor&) = delete;
+  ScopedCommandsExecutor& operator=(const ScopedCommandsExecutor&) = delete;
   ~ScopedCommandsExecutor() { FlushImpl(); }
 
   void ScheduleWakeUp(scoped_refptr<WorkerThread> worker) {
@@ -132,6 +135,8 @@ class ThreadGroupImpl::ScopedCommandsExecutor
   class WorkerContainer {
    public:
     WorkerContainer() = default;
+    WorkerContainer(const WorkerContainer&) = delete;
+    WorkerContainer& operator=(const WorkerContainer&) = delete;
 
     void AddWorker(scoped_refptr<WorkerThread> worker) {
       if (!worker)
@@ -165,8 +170,6 @@ class ThreadGroupImpl::ScopedCommandsExecutor
     // in the case where there is only one worker in the container.
     scoped_refptr<WorkerThread> first_worker_;
     std::vector<scoped_refptr<WorkerThread>> additional_workers_;
-
-    DISALLOW_COPY_AND_ASSIGN(WorkerContainer);
   };
 
   void FlushImpl() {
@@ -210,8 +213,6 @@ class ThreadGroupImpl::ScopedCommandsExecutor
   StackVector<std::pair<HistogramBase*, HistogramBase::Sample>,
               kHistogramSampleStackSize>
       scheduled_histogram_samples_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedCommandsExecutor);
 };
 
 // static
@@ -222,8 +223,13 @@ class ThreadGroupImpl::WorkerThreadDelegateImpl : public WorkerThread::Delegate,
                                                   public BlockingObserver {
  public:
   // |outer| owns the worker for which this delegate is constructed.
-  WorkerThreadDelegateImpl(TrackedRef<ThreadGroupImpl> outer);
-  ~WorkerThreadDelegateImpl() override;
+  explicit WorkerThreadDelegateImpl(TrackedRef<ThreadGroupImpl> outer);
+  WorkerThreadDelegateImpl(const WorkerThreadDelegateImpl&) = delete;
+  WorkerThreadDelegateImpl& operator=(const WorkerThreadDelegateImpl&) = delete;
+
+  // OnMainExit() handles the thread-affine cleanup; WorkerThreadDelegateImpl
+  // can thereafter safely be deleted from any thread.
+  ~WorkerThreadDelegateImpl() override = default;
 
   // WorkerThread::Delegate:
   WorkerThread::ThreadLabel GetThreadLabel() const override;
@@ -334,8 +340,6 @@ class ThreadGroupImpl::WorkerThreadDelegateImpl : public WorkerThread::Delegate,
 
   // Verifies that specific calls are always made from the worker thread.
   THREAD_CHECKER(worker_thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(WorkerThreadDelegateImpl);
 };
 
 ThreadGroupImpl::ThreadGroupImpl(StringPiece histogram_label,
@@ -344,7 +348,7 @@ ThreadGroupImpl::ThreadGroupImpl(StringPiece histogram_label,
                                  TrackedRef<TaskTracker> task_tracker,
                                  TrackedRef<Delegate> delegate)
     : ThreadGroup(std::move(task_tracker), std::move(delegate)),
-      thread_group_label_(thread_group_label.as_string()),
+      thread_group_label_(thread_group_label),
       priority_hint_(priority_hint),
       idle_workers_stack_cv_for_testing_(lock_.CreateConditionVariable()),
       // Mimics the UMA_HISTOGRAM_COUNTS_1000 macro. When a worker runs more
@@ -536,11 +540,6 @@ ThreadGroupImpl::WorkerThreadDelegateImpl::WorkerThreadDelegateImpl(
   DETACH_FROM_THREAD(worker_thread_checker_);
 }
 
-// OnMainExit() handles the thread-affine cleanup; WorkerThreadDelegateImpl
-// can thereafter safely be deleted from any thread.
-ThreadGroupImpl::WorkerThreadDelegateImpl::~WorkerThreadDelegateImpl() =
-    default;
-
 WorkerThread::ThreadLabel
 ThreadGroupImpl::WorkerThreadDelegateImpl::GetThreadLabel() const {
   return WorkerThread::ThreadLabel::POOLED;
@@ -587,6 +586,9 @@ RegisteredTaskSource ThreadGroupImpl::WorkerThreadDelegateImpl::GetWork(
 
   DCHECK(ContainsWorker(outer_->workers_, worker));
 
+  if (!CanGetWorkLockRequired(&executor, worker))
+    return nullptr;
+
   // Use this opportunity, before assigning work to this worker, to create/wake
   // additional workers if needed (doing this here allows us to reduce
   // potentially expensive create/wake directly on PostTask()).
@@ -596,9 +598,6 @@ RegisteredTaskSource ThreadGroupImpl::WorkerThreadDelegateImpl::GetWork(
     outer_->EnsureEnoughWorkersLockRequired(&executor);
     executor.FlushWorkerCreation(&outer_->lock_);
   }
-
-  if (!CanGetWorkLockRequired(&executor, worker))
-    return nullptr;
 
   RegisteredTaskSource task_source;
   TaskPriority priority;
@@ -895,8 +894,7 @@ bool ThreadGroupImpl::WorkerThreadDelegateImpl::CanGetWorkLockRequired(
   // max tasks increases). This ensures that if we have excess workers in the
   // thread group, they get a chance to no longer be excess before being cleaned
   // up.
-  if (outer_->GetNumAwakeWorkersLockRequired() >
-      outer_->GetDesiredNumAwakeWorkersLockRequired()) {
+  if (outer_->GetNumAwakeWorkersLockRequired() > outer_->max_tasks_) {
     OnWorkerBecomesIdleLockRequired(worker);
     return false;
   }

@@ -76,7 +76,8 @@ class BASE_EXPORT ProcessMemoryDump {
   // |start_address| and |mapped_size|. |mapped_size| is specified in bytes. The
   // value returned is valid only if the given range is currently mmapped by the
   // process. The |start_address| must be page-aligned.
-  static size_t CountResidentBytes(void* start_address, size_t mapped_size);
+  static base::Optional<size_t> CountResidentBytes(void* start_address,
+                                                   size_t mapped_size);
 
   // The same as above, but the given mapped range should belong to the
   // shared_memory's mapped region.
@@ -233,7 +234,8 @@ class BASE_EXPORT ProcessMemoryDump {
   void SerializeAllocatorDumpsInto(TracedValue* value) const;
 
   void SerializeAllocatorDumpsInto(
-      perfetto::protos::pbzero::MemoryTrackerSnapshot* memory_snapshot) const;
+      perfetto::protos::pbzero::MemoryTrackerSnapshot* memory_snapshot,
+      const base::ProcessId pid) const;
 
   const MemoryDumpArgs& dump_args() const { return dump_args_; }
 

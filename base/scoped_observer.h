@@ -10,9 +10,13 @@
 #include <vector>
 
 #include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/ranges/algorithm.h"
-#include "base/stl_util.h"
 
+// This class is DEPRECATED. Instead please use one of:
+// - base::ScopedObservation for observing a single source.
+// - base::ScopedMultiSourceObservation for observing multiple sources.
+//
 // ScopedObserver is used to keep track of the set of sources an object has
 // attached itself to as an observer. When ScopedObserver is destroyed it
 // removes the object as an observer from all sources it has been added to.

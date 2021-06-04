@@ -83,17 +83,32 @@ class Value;
 //
 // The new design tries to avoid losing type information. Thus when migrating
 // off deprecated types, existing usages of base::ListValue should be replaced
-// by std::vector<base::Value>.
+// by std::vector<base::Value>, and existing usages of base::DictionaryValue
+// should be replaced with base::flat_map<std::string, base::Value>.
 //
-// Furthermore, existing usages of base::DictionaryValue should eventually be
-// replaced with base::flat_map<std::string, base::Value>. However, this
-// requires breaking changing the mapped type of Value::DictStorage first, and
-// thus usages of base::DictionaryValue should be kept for the time being.
+// OLD WAY:
+//
+//   void AlwaysTakesList(std::unique_ptr<base::ListValue> list);
+//   void AlwaysTakesDict(std::unique_ptr<base::DictionaryValue> dict);
+//
+// NEW WAY:
+//
+//   void AlwaysTakesList(std::vector<base::Value> list);
+//   void AlwaysTakesDict(base::flat_map<std::string, base::Value> dict);
+//
+// Migrating code will require conversions on API boundaries. This can be done
+// cheaply by making use of overloaded base::Value constructors and the
+// Value::TakeList() and Value::TakeDict() APIs.
 class BASE_EXPORT Value {
  public:
   using BlobStorage = std::vector<uint8_t>;
-  using DictStorage = flat_map<std::string, std::unique_ptr<Value>>;
   using ListStorage = std::vector<Value>;
+  using DictStorage = flat_map<std::string, Value>;
+
+  // Like `DictStorage`, but with std::unique_ptr in the mapped type. This is
+  // due to legacy reasons, and should be removed once no caller relies on
+  // stability of pointers anymore.
+  using LegacyDictStorage = flat_map<std::string, std::unique_ptr<Value>>;
 
   using ListView = CheckedContiguousRange<ListStorage>;
   using ConstListView = CheckedContiguousConstRange<ListStorage>;
@@ -171,6 +186,14 @@ class BASE_EXPORT Value {
   bool is_blob() const { return type() == Type::BINARY; }
   bool is_dict() const { return type() == Type::DICTIONARY; }
   bool is_list() const { return type() == Type::LIST; }
+
+  // These will return nullopt / nullptr if the type does not match.
+  Optional<bool> GetIfBool() const;
+  Optional<int> GetIfInt() const;
+  // Implicitly converts from int if necessary.
+  Optional<double> GetIfDouble() const;
+  const std::string* GetIfString() const;
+  const BlobStorage* GetIfBlob() const;
 
   // These will all CHECK that the type matches.
   bool GetBool() const;
@@ -463,6 +486,11 @@ class BASE_EXPORT Value {
   dict_iterator_proxy DictItems();
   const_dict_iterator_proxy DictItems() const;
 
+  // Transfers ownership of the underlying dict to the caller. Subsequent
+  // calls to DictItems() will return an empty dict.
+  // Note: This requires that type() is Type::DICTIONARY.
+  DictStorage TakeDict();
+
   // Returns the size of the dictionary, if the dictionary is empty, and clears
   // the dictionary. Note: These CHECK that type() is Type::DICTIONARY.
   size_t DictSize() const;
@@ -481,19 +509,19 @@ class BASE_EXPORT Value {
   // If the current object can be converted into the given type, the value is
   // returned through the |out_value| parameter and true is returned;
   // otherwise, false is returned and |out_value| is unchanged.
-  // DEPRECATED, use GetBool() instead.
+  // DEPRECATED, use GetIfBool() instead.
   bool GetAsBoolean(bool* out_value) const;
-  // DEPRECATED, use GetInt() instead.
+  // DEPRECATED, use GetIfInt() instead.
   bool GetAsInteger(int* out_value) const;
-  // DEPRECATED, use GetDouble() instead.
+  // DEPRECATED, use GetIfDouble() instead.
   bool GetAsDouble(double* out_value) const;
-  // DEPRECATED, use GetString() instead.
+  // DEPRECATED, use GetIfString() instead.
   bool GetAsString(std::string* out_value) const;
   bool GetAsString(string16* out_value) const;
   bool GetAsString(const Value** out_value) const;
   bool GetAsString(StringPiece* out_value) const;
   // ListValue::From is the equivalent for std::unique_ptr conversions.
-  // DEPRECATED, use GetList() instead.
+  // DEPRECATED, use is_list() instead.
   bool GetAsList(ListValue** out_value);
   bool GetAsList(const ListValue** out_value) const;
   // DictionaryValue::From is the equivalent for std::unique_ptr conversions.
@@ -531,12 +559,21 @@ class BASE_EXPORT Value {
   // base/trace_event/memory_usage_estimator.h for more info.
   size_t EstimateMemoryUsage() const;
 
+  // Serializes to a string for logging and debug purposes.
+  std::string DebugString() const;
+
  protected:
   // Checked convenience accessors for dict and list.
-  const DictStorage& dict() const { return absl::get<DictStorage>(data_); }
-  DictStorage& dict() { return absl::get<DictStorage>(data_); }
+  const LegacyDictStorage& dict() const {
+    return absl::get<LegacyDictStorage>(data_);
+  }
+  LegacyDictStorage& dict() { return absl::get<LegacyDictStorage>(data_); }
   const ListStorage& list() const { return absl::get<ListStorage>(data_); }
   ListStorage& list() { return absl::get<ListStorage>(data_); }
+
+  // Internal constructors, allowing the simplify the implementation of Clone().
+  explicit Value(const LegacyDictStorage& storage);
+  explicit Value(LegacyDictStorage&& storage) noexcept;
 
  private:
   // Special case for doubles, which are aligned to 8 bytes on some
@@ -567,7 +604,7 @@ class BASE_EXPORT Value {
                 DoubleStorage,
                 std::string,
                 BlobStorage,
-                DictStorage,
+                LegacyDictStorage,
                 ListStorage>
       data_;
 };
@@ -577,15 +614,15 @@ class BASE_EXPORT Value {
 // are |std::string|s and should be UTF-8 encoded.
 class BASE_EXPORT DictionaryValue : public Value {
  public:
-  using const_iterator = DictStorage::const_iterator;
-  using iterator = DictStorage::iterator;
+  using const_iterator = LegacyDictStorage::const_iterator;
+  using iterator = LegacyDictStorage::iterator;
 
   // Returns |value| if it is a dictionary, nullptr otherwise.
   static std::unique_ptr<DictionaryValue> From(std::unique_ptr<Value> value);
 
   DictionaryValue();
-  explicit DictionaryValue(const DictStorage& in_dict);
-  explicit DictionaryValue(DictStorage&& in_dict) noexcept;
+  explicit DictionaryValue(const LegacyDictStorage& in_dict);
+  explicit DictionaryValue(LegacyDictStorage&& in_dict) noexcept;
 
   // Returns true if the current dictionary has a value for the given key.
   // DEPRECATED, use Value::FindKey(key) instead.
@@ -759,7 +796,7 @@ class BASE_EXPORT DictionaryValue : public Value {
 
    private:
     const DictionaryValue& target_;
-    DictStorage::const_iterator it_;
+    LegacyDictStorage::const_iterator it_;
   };
 
   // Iteration.

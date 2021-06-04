@@ -422,8 +422,7 @@ Optional<Value> JSONParser::ConsumeDictionary() {
       return nullopt;
     }
 
-    dict_storage.emplace_back(key.DestructiveAsString(),
-                              std::make_unique<Value>(std::move(*value)));
+    dict_storage.emplace_back(key.DestructiveAsString(), std::move(*value));
 
     token = GetNextToken();
     if (token == T_LIST_SEPARATOR) {
@@ -751,8 +750,7 @@ Optional<Value> JSONParser::ConsumeNumber() {
     return Value(num_int);
 
   double num_double;
-  if (StringToDouble(num_string.as_string(), &num_double) &&
-      std::isfinite(num_double)) {
+  if (StringToDouble(num_string, &num_double) && std::isfinite(num_double)) {
     return Value(num_double);
   }
 

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/python.gni")
 import("//third_party/closure_compiler/closure_args.gni")
 import("//third_party/closure_compiler/compile_js.gni")
 import("//third_party/protobuf/proto_library.gni")
@@ -63,10 +64,13 @@ declare_args() {
 # ARC) we have to explicitly opt out there even when NaCl is enabled (and
 # consequently also when building for NaCl toolchains.) For this reason we
 # check |target_os| explicitly, as it's consistent across all toolchains.
+#
+# TODO(crbug.com/1052397): Remove !chromeos_is_browser_only once
+# lacros-chrome switches to target_os="chromeos"
 enable_scrambled_message_ids =
     enable_mojom_message_id_scrambling &&
-    (is_mac || is_win || (is_linux && !is_chromeos && !is_chromecast &&
-                          !chromeos_is_browser_only) ||
+    (is_mac || is_win ||
+     (is_linux && !is_chromeos_ash && !is_chromecast && !is_chromeos_lacros) ||
      ((enable_nacl || is_nacl || is_nacl_nonsfi) &&
       (target_os != "chromeos" && !chromeos_is_browser_only)))
 
@@ -94,7 +98,6 @@ mojom_generator_sources =
     mojom_parser_sources + [
       "$mojom_generator_root/generators/cpp_util.py",
       "$mojom_generator_root/generators/mojom_cpp_generator.py",
-      "$mojom_generator_root/generators/cpp_tracing_support.py",
       "$mojom_generator_root/generators/mojom_java_generator.py",
       "$mojom_generator_root/generators/mojom_mojolpm_generator.py",
       "$mojom_generator_root/generators/mojom_js_generator.py",
@@ -180,6 +183,15 @@ if (enable_scrambled_message_ids) {
 #
 #   import_dirs (optional)
 #       List of import directories that will get added when processing sources.
+#
+#   input_root_override (optional)
+#       Root path for the .mojom files used to generate the namespaces for
+#       interfaces. Useful with targets outside //, e.g. in parent directories
+#       above "//". The default input root is //
+#       Example: Vivaldi's source root is "//vivaldi/",
+#       and "//vivaldi/chromium/" is "//"
+#       In such cases, not using this argument lead to the output files being
+#       located in different directories than expected.
 #
 #   testonly (optional)
 #
@@ -543,7 +555,11 @@ template("mojom") {
   # for the naming of any generated output files derived from their
   # corresponding input mojoms. These paths are always considered to be relative
   # to root_gen_dir.
-  source_abspaths = rebase_path(sources_list, "//")
+  if (defined(invoker.input_root_override)) {
+    source_abspaths = rebase_path(sources_list, invoker.input_root_override)
+  } else {
+    source_abspaths = rebase_path(sources_list, "//")
+  }
   output_file_base_paths = []
   foreach(path, source_abspaths) {
     output_file_base_paths +=
@@ -615,13 +631,13 @@ template("mojom") {
     }
     if (is_android) {
       enabled_features += [ "is_android" ]
-    } else if (is_chromeos) {
+    } else if (is_chromeos_ash) {
       enabled_features += [ "is_chromeos" ]
     } else if (is_fuchsia) {
       enabled_features += [ "is_fuchsia" ]
     } else if (is_ios) {
       enabled_features += [ "is_ios" ]
-    } else if (is_linux) {
+    } else if (is_linux || is_chromeos_lacros) {
       enabled_features += [ "is_linux" ]
     } else if (is_mac) {
       enabled_features += [ "is_mac" ]
@@ -651,7 +667,7 @@ template("mojom") {
         # Resolve relative input mojom paths against both the root src dir and
         # the root gen dir.
         "--input-root",
-        rebase_path("//"),
+        rebase_path("//."),
         "--input-root",
         rebase_path(root_gen_dir),
 
@@ -663,6 +679,13 @@ template("mojom") {
         "--check-imports",
         rebase_path(build_metadata_filename),
       ]
+
+      if (defined(invoker.input_root_override)) {
+        args += [
+          "--input-root",
+          rebase_path(invoker.input_root_override),
+        ]
+      }
 
       foreach(enabled_feature, enabled_features) {
         args += [
@@ -684,18 +707,29 @@ template("mojom") {
 
   # Generate code that is shared by different variants.
   if (sources_list != []) {
+    base_dir = "//"
+    if (defined(invoker.input_root_override)) {
+      base_dir = invoker.input_root_override
+    }
+
     common_generator_args = [
       "--use_bundled_pylibs",
       "-o",
       rebase_path(root_gen_dir, root_build_dir),
       "generate",
       "-d",
-      rebase_path("//", root_build_dir),
+      rebase_path(base_dir, root_build_dir),
       "-I",
       rebase_path("//", root_build_dir),
       "--bytecode_path",
       rebase_path("$root_gen_dir/mojo/public/tools/bindings", root_build_dir),
     ]
+    if (defined(invoker.input_root_override)) {
+      common_generator_args += [
+        "-I",
+        rebase_path(invoker.input_root_override, root_build_dir),
+      ]
+    }
 
     if (defined(invoker.disallow_native_types) &&
         invoker.disallow_native_types) {
@@ -785,6 +819,7 @@ template("mojom") {
     }
 
     generator_shared_target_name = "${target_name}_shared__generator"
+
     action(generator_shared_target_name) {
       visibility = [ ":*" ]
       script = mojom_generator_script
@@ -904,6 +939,7 @@ template("mojom") {
 
     generator_mojolpm_proto_target_name =
         "${target_name}_mojolpm_proto_generator"
+
     action(generator_mojolpm_proto_target_name) {
       script = mojom_generator_script
       inputs = mojom_generator_sources + jinja2_sources
@@ -1093,6 +1129,7 @@ template("mojom") {
       ]
 
       generator_target_name = "${target_name}${variant_suffix}__generator"
+
       action(generator_target_name) {
         visibility = [ ":*" ]
         script = mojom_generator_script
@@ -1273,6 +1310,7 @@ template("mojom") {
     }
     write_file(_typemap_config_filename, _rebased_typemap_configs, "json")
     _mojom_target_name = target_name
+
     action(_typemap_validator_target_name) {
       script = "$mojom_generator_root/validate_typemap_config.py"
       inputs = [ _typemap_config_filename ]
@@ -1333,6 +1371,10 @@ template("mojom") {
       foreach(d, all_deps) {
         full_name = get_label_info("$d", "label_no_toolchain")
         public_deps += [ "${full_name}${variant_suffix}_headers" ]
+      }
+      if (defined(bindings_configuration.for_blink) &&
+          bindings_configuration.for_blink) {
+        public_deps += [ "//mojo/public/cpp/bindings:wtf_support" ]
       }
     }
 
@@ -1492,6 +1534,7 @@ template("mojom") {
       }
 
       java_srcjar_target_name = target_name + "_java_sources"
+
       action(java_srcjar_target_name) {
         script = "//build/android/gyp/zip.py"
         inputs = []
@@ -1551,6 +1594,7 @@ template("mojom") {
       !use_typescript_for_target) {
     if (sources_list != []) {
       generator_js_target_name = "${target_name}_js__generator"
+
       action(generator_js_target_name) {
         script = mojom_generator_script
         inputs = mojom_generator_sources + jinja2_sources
@@ -1791,6 +1835,7 @@ template("mojom") {
       # Generate Typescript bindings.
       generator_ts_target_name =
           "${target_name}_${dependency_type.name}__ts__generator"
+
       action(generator_ts_target_name) {
         script = mojom_generator_script
         inputs = mojom_generator_sources + jinja2_sources

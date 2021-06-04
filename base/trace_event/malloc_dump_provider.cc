@@ -11,6 +11,8 @@
 #include "base/allocator/allocator_extension.h"
 #include "base/allocator/buildflags.h"
 #include "base/debug/profiler.h"
+#include "base/memory/nonscannable_memory.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/traced_value.h"
 #include "build/build_config.h"
@@ -65,21 +67,53 @@ void WinHeapMemoryDumpImpl(WinHeapInfo* crt_heap_info) {
 #endif  // defined(OS_WIN)
 
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-void ReportDetailedPartitionAllocStats(ProcessMemoryDump* pmd) {
+void ReportPartitionAllocDetailedStatsFor(ThreadSafePartitionRoot& root,
+                                          ProcessMemoryDump* pmd,
+                                          const char* name) {
   SimplePartitionStatsDumper allocator_dumper;
-  internal::PartitionAllocMalloc::Allocator()->DumpStats("malloc", false,
-                                                         &allocator_dumper);
+  root.DumpStats(name, false /* is_light_dump */, &allocator_dumper);
+  // These should be included in the overall figure, so using a child dump.
+  auto* allocator_dump = pmd->CreateAllocatorDump(name);
+  allocator_dump->AddScalar("virtual_size", MemoryAllocatorDump::kUnitsBytes,
+                            allocator_dumper.stats().total_mmapped_bytes);
+  allocator_dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                            MemoryAllocatorDump::kUnitsBytes,
+                            allocator_dumper.stats().total_resident_bytes);
+  allocator_dump->AddScalar("allocated_size", MemoryAllocatorDump::kUnitsBytes,
+                            allocator_dumper.stats().total_active_bytes);
+}
+
+void ReportPartitionAllocStats(ProcessMemoryDump* pmd, bool detailed) {
+  SimplePartitionStatsDumper allocator_dumper;
+  auto* allocator = internal::PartitionAllocMalloc::Allocator();
+  allocator->DumpStats("malloc", !detailed /* is_light_dump */,
+                       &allocator_dumper);
+  // TODO(bartekn): Dump OriginalAllocator() into "malloc" as well.
 
   if (allocator_dumper.stats().has_thread_cache) {
     const auto& stats = allocator_dumper.stats().all_thread_caches_stats;
     auto* thread_cache_dump = pmd->CreateAllocatorDump("malloc/thread_cache");
-    ReportPartitionAllocThreadCacheStats(thread_cache_dump, stats);
+    ReportPartitionAllocThreadCacheStats(thread_cache_dump, stats, "");
     const auto& main_thread_stats =
         allocator_dumper.stats().current_thread_cache_stats;
     auto* main_thread_cache_dump =
         pmd->CreateAllocatorDump("malloc/thread_cache/main_thread");
     ReportPartitionAllocThreadCacheStats(main_thread_cache_dump,
-                                         main_thread_stats);
+                                         main_thread_stats, ".MainThread");
+  }
+
+  // Not reported in UMA, detailed dumps only.
+  if (detailed) {
+    auto* aligned_allocator =
+        internal::PartitionAllocMalloc::AlignedAllocator();
+    if (aligned_allocator != allocator) {
+      ReportPartitionAllocDetailedStatsFor(
+          *internal::PartitionAllocMalloc::AlignedAllocator(), pmd,
+          "malloc/aligned");
+    }
+    auto& nonscannable_allocator = internal::NonScannableAllocator::Instance();
+    if (auto* root = nonscannable_allocator.root())
+      ReportPartitionAllocDetailedStatsFor(*root, pmd, "malloc/nonscannable");
   }
 }
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
@@ -113,9 +147,8 @@ bool MallocDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
   size_t allocated_objects_size = 0;
   size_t allocated_objects_count = 0;
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  if (args.level_of_detail == MemoryDumpLevelOfDetail::DETAILED) {
-    ReportDetailedPartitionAllocStats(pmd);
-  }
+  ReportPartitionAllocStats(
+      pmd, args.level_of_detail == MemoryDumpLevelOfDetail::DETAILED);
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 
 #if BUILDFLAG(USE_TCMALLOC)
@@ -215,9 +248,9 @@ void MallocDumpProvider::DisableMetrics() {
 }
 
 #if BUILDFLAG(USE_PARTITION_ALLOC)
-void ReportPartitionAllocThreadCacheStats(
-    MemoryAllocatorDump* dump,
-    const internal::ThreadCacheStats& stats) {
+void ReportPartitionAllocThreadCacheStats(MemoryAllocatorDump* dump,
+                                          const ThreadCacheStats& stats,
+                                          const std::string& metrics_suffix) {
   dump->AddScalar("alloc_count", "scalar", stats.alloc_count);
   dump->AddScalar("alloc_hits", "scalar", stats.alloc_hits);
   dump->AddScalar("alloc_misses", "scalar", stats.alloc_misses);
@@ -228,12 +261,24 @@ void ReportPartitionAllocThreadCacheStats(
   dump->AddScalar("cache_fill_count", "scalar", stats.cache_fill_count);
   dump->AddScalar("cache_fill_hits", "scalar", stats.cache_fill_hits);
   dump->AddScalar("cache_fill_misses", "scalar", stats.cache_fill_misses);
-  dump->AddScalar("cache_fill_bucket_full", "scalar",
-                  stats.cache_fill_bucket_full);
-  dump->AddScalar("cache_fill_too_large", "scalar", stats.cache_fill_too_large);
+
+  dump->AddScalar("batch_fill_count", "scalar", stats.batch_fill_count);
 
   dump->AddScalar("size", "bytes", stats.bucket_total_memory);
   dump->AddScalar("metadata_overhead", "bytes", stats.metadata_overhead);
+
+  if (stats.alloc_count) {
+    int hit_rate_percent =
+        static_cast<int>((100 * stats.alloc_hits) / stats.alloc_count);
+    base::UmaHistogramPercentage(
+        "Memory.PartitionAlloc.ThreadCache.HitRate" + metrics_suffix,
+        hit_rate_percent);
+    int batch_fill_rate_percent =
+        static_cast<int>((100 * stats.batch_fill_count) / stats.alloc_count);
+    base::UmaHistogramPercentage(
+        "Memory.PartitionAlloc.ThreadCache.BatchFillRate" + metrics_suffix,
+        batch_fill_rate_percent);
+  }
 }
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC)
 

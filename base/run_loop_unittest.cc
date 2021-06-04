@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/containers/queue.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
@@ -17,7 +17,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/test/bind_test_util.h"
+#include "base/test/bind.h"
 #include "base/test/gtest_util.h"
 #include "base/test/scoped_run_loop_timeout.h"
 #include "base/test/task_environment.h"
@@ -532,13 +532,13 @@ TEST_P(RunLoopTest, NestingObservers) {
   RunLoop::RemoveNestingObserverOnCurrentThread(&nesting_observer);
 }
 
-TEST_P(RunLoopTest, DisallowRunningForTesting) {
-  RunLoop::ScopedDisallowRunningForTesting disallow_running;
+TEST_P(RunLoopTest, DisallowRunning) {
+  RunLoop::ScopedDisallowRunning disallow_running;
   EXPECT_DCHECK_DEATH({ run_loop_.RunUntilIdle(); });
 }
 
-TEST_P(RunLoopTest, ExpiredDisallowRunningForTesting) {
-  { RunLoop::ScopedDisallowRunningForTesting disallow_running; }
+TEST_P(RunLoopTest, ExpiredDisallowRunning) {
+  { RunLoop::ScopedDisallowRunning disallow_running; }
   // Running should be fine after |disallow_running| goes out of scope.
   run_loop_.RunUntilIdle();
 }

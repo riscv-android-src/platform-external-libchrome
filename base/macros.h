@@ -20,24 +20,27 @@
 // //styleguide/c++/c++-dos-and-donts.md for more information.
 
 // Put this in the declarations for a class to be uncopyable.
+// DEPRECATED: See above. Makes a class uncopyable.
 #if !defined(DISALLOW_COPY)
 #define DISALLOW_COPY(TypeName) \
   TypeName(const TypeName&) = delete
 #endif
 
 // Put this in the declarations for a class to be unassignable.
+// DEPRECATED: See above. Makes a class unassignable.
 #if !defined(DISALLOW_ASSIGN)
 #define DISALLOW_ASSIGN(TypeName) TypeName& operator=(const TypeName&) = delete
 #endif
 
 // Put this in the declarations for a class to be uncopyable and unassignable.
+// DEPRECATED: See above. Makes a class uncopyable and unassignable.
 #if !defined(DISALLOW_COPY_AND_ASSIGN)
 #define DISALLOW_COPY_AND_ASSIGN(TypeName) \
   DISALLOW_COPY(TypeName);                 \
   DISALLOW_ASSIGN(TypeName)
 #endif
 
-// A macro to disallow all the implicit constructors, namely the
+// DEPRECATED: See above. Disallow all implicit constructors, namely the
 // default constructor, copy constructor and operator= functions.
 // This is especially useful for classes containing only static methods.
 #if !defined(DISALLOW_IMPLICIT_CONSTRUCTORS)

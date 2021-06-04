@@ -21,17 +21,11 @@ revert-crbug-1001171.patch
 # CHECK* not implitly included by base/logging.h
 backward-compatibility-check.patch
 
-# Cherry-pick of r829887 with BUILD.gn updates
-Clean-up-ScopedSetRunningOnChromeOSForTesting.patch
+# For base/notreached.h implicitly included via trace_event.h use in
+# ipc/ipc_message_utils.cc.
+# Remove after r875277 uprev.
+add-include-header-base-notreached.h.patch
 
-# Cherry-pick from r833197 for -Wc++11-narrowing
-explicit-cast-from-char-to-unsigned-type.patch
-
-# Remove after uprev to r837885
-py3.patch
-
-# Forward compatibility patches for r860220 uprev
-forward-compatibility-new-header-files.patch
-forward-compatibility-base-MakeStringPiece.patch
-forward-compatibility-FilePathWatcher-Watch-with-enum-type.patch
-forward-compatibility-Add-base-ObserverList-empty.patch
+# Backward compatibility for seccomp issues with memfd_create
+# TODO(b/189403036): enable when thorough testing is done after libchrome uprev
+disable-Channel-SupportsChannelUpgrade.patch

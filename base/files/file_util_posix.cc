@@ -34,6 +34,8 @@
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/stl_util.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -107,16 +109,8 @@ bool VerifySpecificPathControlledByUser(const FilePath& path,
   return true;
 }
 
-std::string TempFileName() {
-#if defined(OS_APPLE)
-  return StringPrintf(".%s.XXXXXX", base::mac::BaseBundleID());
-#endif
-
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  return std::string(".com.google.Chrome.XXXXXX");
-#else
-  return std::string(".org.chromium.Chromium.XXXXXX");
-#endif
+base::FilePath GetTempTemplate() {
+  return FormatTemporaryFileName("XXXXXX");
 }
 
 bool AdvanceEnumeratorWithStat(FileEnumerator* traversal,
@@ -130,32 +124,6 @@ bool AdvanceEnumeratorWithStat(FileEnumerator* traversal,
 
   *out_next_stat = traversal->GetInfo().stat();
   return true;
-}
-
-bool CopyFileContents(File* infile, File* outfile) {
-  static constexpr size_t kBufferSize = 32768;
-  std::vector<char> buffer(kBufferSize);
-
-  for (;;) {
-    ssize_t bytes_read = infile->ReadAtCurrentPos(buffer.data(), buffer.size());
-    if (bytes_read < 0)
-      return false;
-    if (bytes_read == 0)
-      return true;
-    // Allow for partial writes
-    ssize_t bytes_written_per_read = 0;
-    do {
-      ssize_t bytes_written_partial = outfile->WriteAtCurrentPos(
-          &buffer[bytes_written_per_read], bytes_read - bytes_written_per_read);
-      if (bytes_written_partial < 0)
-        return false;
-
-      bytes_written_per_read += bytes_written_partial;
-    } while (bytes_written_per_read < bytes_read);
-  }
-
-  NOTREACHED();
-  return false;
 }
 
 bool DoCopyDirectory(const FilePath& from_path,
@@ -277,7 +245,7 @@ bool DoCopyDirectory(const FilePath& from_path,
     // set of permissions than it does on other POSIX platforms.
 #if defined(OS_APPLE)
     int mode = 0600 | (stat_at_use.st_mode & 0177);
-#elif defined(OS_CHROMEOS) || BUILDFLAG(IS_LACROS)
+#elif BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
     int mode = 0644;
 #else
     int mode = 0600;
@@ -289,7 +257,7 @@ bool DoCopyDirectory(const FilePath& from_path,
       return false;
     }
 
-    if (!CopyFileContents(&infile, &outfile)) {
+    if (!CopyFileContents(infile, outfile)) {
       DLOG(ERROR) << "CopyDirectory() couldn't copy file: " << current.value();
       return false;
     }
@@ -314,12 +282,12 @@ bool DoDeleteFile(const FilePath& path, bool recursive) {
   stat_wrapper_t file_info;
   if (File::Lstat(path_str, &file_info) != 0) {
     // The Windows version defines this condition as success.
-    return (errno == ENOENT || errno == ENOTDIR);
+    return (errno == ENOENT);
   }
   if (!S_ISDIR(file_info.st_mode))
-    return (unlink(path_str) == 0);
+    return (unlink(path_str) == 0) || (errno == ENOENT);
   if (!recursive)
-    return (rmdir(path_str) == 0);
+    return (rmdir(path_str) == 0) || (errno == ENOENT);
 
   bool success = true;
   stack<std::string> directories;
@@ -332,13 +300,13 @@ bool DoDeleteFile(const FilePath& path, bool recursive) {
     if (traversal.GetInfo().IsDirectory())
       directories.push(current.value());
     else
-      success &= (unlink(current.value().c_str()) == 0);
+      success &= (unlink(current.value().c_str()) == 0) || (errno == ENOENT);
   }
 
   while (!directories.empty()) {
     FilePath dir = FilePath(directories.top());
     directories.pop();
-    success &= (rmdir(dir.value().c_str()) == 0);
+    success &= (rmdir(dir.value().c_str()) == 0) || (errno == ENOENT);
   }
   return success;
 }
@@ -349,7 +317,7 @@ bool DoDeleteFile(const FilePath& path, bool recursive) {
 // https://www.gnu.org/software/libc/manual/html_node/Opening-Streams.html for
 // details.
 std::string AppendModeCharacter(StringPiece mode, char mode_char) {
-  std::string result(mode.as_string());
+  std::string result(mode);
   size_t comma_pos = result.find(',');
   result.insert(comma_pos == std::string::npos ? result.length() : comma_pos, 1,
                 mode_char);
@@ -511,7 +479,7 @@ ScopedFD CreateAndOpenFdForTemporaryFileInDir(const FilePath& directory,
   ScopedBlockingCall scoped_blocking_call(
       FROM_HERE,
       BlockingType::MAY_BLOCK);  // For call to mkstemp().
-  *path = directory.Append(TempFileName());
+  *path = directory.Append(GetTempTemplate());
   const std::string& tmpdir_string = path->value();
   // this should be OK since mkstemp just replaces characters in place
   char* buffer = const_cast<char*>(tmpdir_string.c_str());
@@ -633,7 +601,7 @@ bool GetTempDir(FilePath* path) {
 
 #if !defined(OS_APPLE)  // Mac implementation is in file_util_mac.mm.
 FilePath GetHomeDir() {
-#if defined(OS_CHROMEOS) || BUILDFLAG(IS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   if (SysInfo::IsRunningOnChromeOS()) {
     // On Chrome OS chrome::DIR_USER_DATA is overridden with a primary user
     // homedir once it becomes available. Return / as the safe option.
@@ -661,7 +629,8 @@ FilePath GetHomeDir() {
 File CreateAndOpenTemporaryFileInDir(const FilePath& dir, FilePath* temp_file) {
   // For call to close() inside ScopedFD.
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
-  return File(CreateAndOpenFdForTemporaryFileInDir(dir, temp_file));
+  ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(dir, temp_file);
+  return fd.is_valid() ? File(std::move(fd)) : File(File::GetLastFileError());
 }
 
 bool CreateTemporaryFileInDir(const FilePath& dir, FilePath* temp_file) {
@@ -669,6 +638,17 @@ bool CreateTemporaryFileInDir(const FilePath& dir, FilePath* temp_file) {
   ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(dir, temp_file);
   return fd.is_valid();
+}
+
+FilePath FormatTemporaryFileName(FilePath::StringPieceType identifier) {
+#if defined(OS_APPLE)
+  StringPiece prefix = base::mac::BaseBundleID();
+#elif BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  StringPiece prefix = "com.google.Chrome";
+#else
+  StringPiece prefix = "org.chromium.Chromium";
+#endif
+  return FilePath(StrCat({".", prefix, ".", identifier}));
 }
 
 ScopedFILE CreateAndOpenTemporaryStreamInDir(const FilePath& dir,
@@ -685,12 +665,12 @@ ScopedFILE CreateAndOpenTemporaryStreamInDir(const FilePath& dir,
 }
 
 static bool CreateTemporaryDirInDirImpl(const FilePath& base_dir,
-                                        const FilePath::StringType& name_tmpl,
+                                        const FilePath& name_tmpl,
                                         FilePath* new_dir) {
   ScopedBlockingCall scoped_blocking_call(
       FROM_HERE, BlockingType::MAY_BLOCK);  // For call to mkdtemp().
-  DCHECK(name_tmpl.find("XXXXXX") != FilePath::StringType::npos)
-      << "Directory name template must contain \"XXXXXX\".";
+  DCHECK(EndsWith(name_tmpl.value(), "XXXXXX"))
+      << "Directory name template must end with \"XXXXXX\".";
 
   FilePath sub_dir = base_dir.Append(name_tmpl);
   std::string sub_dir_string = sub_dir.value();
@@ -710,8 +690,9 @@ bool CreateTemporaryDirInDir(const FilePath& base_dir,
                              const FilePath::StringType& prefix,
                              FilePath* new_dir) {
   FilePath::StringType mkdtemp_template = prefix;
-  mkdtemp_template.append(FILE_PATH_LITERAL("XXXXXX"));
-  return CreateTemporaryDirInDirImpl(base_dir, mkdtemp_template, new_dir);
+  mkdtemp_template.append("XXXXXX");
+  return CreateTemporaryDirInDirImpl(base_dir, FilePath(mkdtemp_template),
+                                     new_dir);
 }
 
 bool CreateNewTempDirectory(const FilePath::StringType& prefix,
@@ -720,7 +701,7 @@ bool CreateNewTempDirectory(const FilePath::StringType& prefix,
   if (!GetTempDir(&tmpdir))
     return false;
 
-  return CreateTemporaryDirInDirImpl(tmpdir, TempFileName(), new_temp_path);
+  return CreateTemporaryDirInDirImpl(tmpdir, GetTempTemplate(), new_temp_path);
 }
 
 bool CreateDirectoryAndGetError(const FilePath& full_path,
@@ -976,7 +957,7 @@ bool AllocateFileRegion(File* file, int64_t offset, size_t size) {
 
   // Write starting at the next block boundary after the old file length.
   const int64_t extension_start =
-      base::bits::Align(original_file_len, block_size);
+      base::bits::AlignUp(original_file_len, block_size);
   for (int64_t i = extension_start; i < new_file_len; i += block_size) {
     char existing_byte;
     if (HANDLE_EINTR(pread(file->GetPlatformFile(), &existing_byte, 1, i)) !=
@@ -1124,7 +1105,7 @@ int GetMaximumPathComponentLength(const FilePath& path) {
 bool GetShmemTempDir(bool executable, FilePath* path) {
 #if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
   bool disable_dev_shm = false;
-#if !defined(OS_CHROMEOS) && !BUILDFLAG(IS_LACROS)
+#if !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_CHROMEOS_LACROS)
   disable_dev_shm = CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableDevShmUsage);
 #endif
@@ -1164,7 +1145,7 @@ bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
   if (!outfile.IsValid())
     return false;
 
-  return CopyFileContents(&infile, &outfile);
+  return CopyFileContents(infile, outfile);
 }
 #endif  // !defined(OS_APPLE)
 
