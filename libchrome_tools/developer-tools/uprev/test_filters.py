@@ -20,6 +20,7 @@ class TestFilters(unittest.TestCase):
     def test_filters(self):
         test_filter = filters.Filter([re.compile(rb'want.*')],
                                      [re.compile(rb'want_excluded.*')],
+                                     [re.compile(rb'want_excluded_always.*')],
                                      [re.compile(rb'keep.*')],
                                      [re.compile(rb'keep_excluded.*')])
 
@@ -33,14 +34,16 @@ class TestFilters(unittest.TestCase):
                 self._build_file_list([
                     'want/xxx',
                     'want_excluded/xxx',
+                    'want_excluded_always/xxx',
                     'unrelated_upstream_file',
                 ])),
-            self._build_file_list(['want/xxx', 'keep/xxx']),
+            self._build_file_list(
+                ['want/xxx', 'want_excluded_always/xxx', 'keep/xxx']),
         )
 
     def test_path_filter(self):
         test_filter = filters.Filter([filters.PathFilter([b'a/b/c', b'd'])], [],
-                                     [], [])
+                                     [], [], [])
 
         self.assertEquals(
             test_filter.filter_files(

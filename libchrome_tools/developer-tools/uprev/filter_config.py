@@ -43,6 +43,9 @@ WANT_EXCLUDE = [
     re.compile(rb'dbus/(test_serv(er|ice)\.cc|test_service\.h)$')
 ]
 
+# ALWAYS_WANT is a WANT, but not excluded by WANT_EXCLUDE
+ALWAYS_WANT = [re.compile(rb'base/hash/(md5|sha1)_nacl\.(h|cc)$')]
+
 # Files matching KEEP should not be touched.
 # aka files matching KEEP will keep its our_files version,
 # and it will be kept even it doesn't exist in upstream.

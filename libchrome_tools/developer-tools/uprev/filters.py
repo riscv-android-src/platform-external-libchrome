@@ -29,12 +29,13 @@ class Filter:
     Provide filter functions for libchrome uprev tools
     """
 
-    def __init__(self, want, want_excluded, keep, keep_excluded):
+    def __init__(self, want, want_excluded, always_want, keep, keep_excluded):
         """
         Initialize filters with given filter rules.
         """
         self.want = want
         self.want_excluded = want_excluded
+        self.always_want = always_want
         self.keep = keep
         self.keep_excluded = keep_excluded
 
@@ -48,6 +49,10 @@ class Filter:
         for exclude_file_regex in self.want_excluded:
             if exclude_file_regex.match(path):
                 wanted = False
+                break
+        for always_want_file_regex in self.always_want:
+            if always_want_file_regex.match(path):
+                wanted = True
                 break
         return wanted
 

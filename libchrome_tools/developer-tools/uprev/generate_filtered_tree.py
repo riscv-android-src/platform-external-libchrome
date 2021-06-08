@@ -347,11 +347,12 @@ def main():
         with open(arg.filter_files) as f:
             lines = [line.strip().encode('utf-8') for line in f]
         libchrome_filter = filters.Filter([filters.PathFilter(lines)], [], [],
-                                          [])
+                                          [], [])
         print('Filter loaded', file=INFO)
     else:
         libchrome_filter = filters.Filter(filter_config.WANT,
                                           filter_config.WANT_EXCLUDE,
+                                          filter_config.ALWAYS_WANT,
                                           filter_config.KEEP,
                                           filter_config.KEEP_EXCLUDE)
 

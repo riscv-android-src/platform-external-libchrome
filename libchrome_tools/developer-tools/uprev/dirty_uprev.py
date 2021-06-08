@@ -59,6 +59,7 @@ def main():
     # Initialize filters
     libchrome_filter = filters.Filter(filter_config.WANT,
                                       filter_config.WANT_EXCLUDE,
+                                      filter_config.ALWAYS_WANT,
                                       filter_config.KEEP,
                                       filter_config.KEEP_EXCLUDE)
 
