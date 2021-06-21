@@ -11,11 +11,13 @@
 
 #include "base/atomic_ref_count.h"
 #include "base/base_export.h"
+#include "base/check_op.h"
 #include "base/compiler_specific.h"
-#include "base/logging.h"
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/sequence_checker.h"
+#include "base/template_util.h"
 #include "base/threading/thread_collision_warner.h"
 #include "build/build_config.h"
 
@@ -25,6 +27,7 @@ namespace subtle {
 class BASE_EXPORT RefCountedBase {
  public:
   bool HasOneRef() const { return ref_count_ == 1; }
+  bool HasAtLeastOneRef() const { return ref_count_ >= 1; }
 
  protected:
   explicit RefCountedBase(StartRefCountFromZeroTag) {
@@ -47,10 +50,6 @@ class BASE_EXPORT RefCountedBase {
   }
 
   void AddRef() const {
-    // TODO(maruel): Add back once it doesn't assert 500 times/sec.
-    // Current thread books the critical section "AddRelease"
-    // without release it.
-    // DFAKE_SCOPED_LOCK_THREAD_LOCKED(add_release_);
 #if DCHECK_IS_ON()
     DCHECK(!in_dtor_);
     DCHECK(!needs_adopt_ref_)
@@ -67,12 +66,7 @@ class BASE_EXPORT RefCountedBase {
 
   // Returns true if the object should self-delete.
   bool Release() const {
-    --ref_count_;
-
-    // TODO(maruel): Add back once it doesn't assert 500 times/sec.
-    // Current thread books the critical section "AddRelease"
-    // without release it.
-    // DFAKE_SCOPED_LOCK_THREAD_LOCKED(add_release_);
+    ReleaseImpl();
 
 #if DCHECK_IS_ON()
     DCHECK(!in_dtor_);
@@ -113,6 +107,8 @@ class BASE_EXPORT RefCountedBase {
   template <typename U>
   friend scoped_refptr<U> base::AdoptRef(U*);
 
+  FRIEND_TEST_ALL_PREFIXES(RefCountedDeathTest, TestOverflowCheck);
+
   void Adopted() const {
 #if DCHECK_IS_ON()
     DCHECK(needs_adopt_ref_);
@@ -120,10 +116,12 @@ class BASE_EXPORT RefCountedBase {
 #endif
   }
 
-#if defined(ARCH_CPU_64_BIT)
+#if defined(ARCH_CPU_64_BITS)
   void AddRefImpl() const;
+  void ReleaseImpl() const;
 #else
   void AddRefImpl() const { ++ref_count_; }
+  void ReleaseImpl() const { --ref_count_; }
 #endif
 
 #if DCHECK_IS_ON()
@@ -131,6 +129,8 @@ class BASE_EXPORT RefCountedBase {
 #endif
 
   mutable uint32_t ref_count_ = 0;
+  static_assert(std::is_unsigned<decltype(ref_count_)>::value,
+                "ref_count_ must be an unsigned type.");
 
 #if DCHECK_IS_ON()
   mutable bool needs_adopt_ref_ = false;
@@ -146,6 +146,7 @@ class BASE_EXPORT RefCountedBase {
 class BASE_EXPORT RefCountedThreadSafeBase {
  public:
   bool HasOneRef() const;
+  bool HasAtLeastOneRef() const;
 
  protected:
   explicit constexpr RefCountedThreadSafeBase(StartRefCountFromZeroTag) {}
@@ -169,10 +170,12 @@ class BASE_EXPORT RefCountedThreadSafeBase {
   // Returns true if the object should self-delete.
   bool Release() const { return ReleaseImpl(); }
   void AddRef() const { AddRefImpl(); }
+  void AddRefWithCheck() const { AddRefWithCheckImpl(); }
 #else
   // Returns true if the object should self-delete.
   bool Release() const;
   void AddRef() const;
+  void AddRefWithCheck() const;
 #endif
 
  private:
@@ -195,6 +198,17 @@ class BASE_EXPORT RefCountedThreadSafeBase {
         << " MakeRefCounted.";
 #endif
     ref_count_.Increment();
+  }
+
+  ALWAYS_INLINE void AddRefWithCheckImpl() const {
+#if DCHECK_IS_ON()
+    DCHECK(!in_dtor_);
+    DCHECK(!needs_adopt_ref_)
+        << "This RefCounted object is created with non-zero reference count."
+        << " The first reference to such a object has to be made by AdoptRef or"
+        << " MakeRefCounted.";
+#endif
+    CHECK(ref_count_.Increment() > 0);
   }
 
   ALWAYS_INLINE bool ReleaseImpl() const {
@@ -255,9 +269,11 @@ class BASE_EXPORT ScopedAllowCrossThreadRefCountAccess final {
 //     ~MyFoo();
 //   };
 //
-// You should always make your destructor non-public, to avoid any code deleting
-// the object accidently while there are references to it.
-//
+// Usage Notes:
+// 1. You should always make your destructor non-public, to avoid any code
+// deleting the object accidentally while there are references to it.
+// 2. You should always make the ref-counted base class a friend of your class,
+// so that it can access the destructor.
 //
 // The ref count manipulation to RefCounted is NOT thread safe and has DCHECKs
 // to trap unsafe cross thread usage. A subclass instance of RefCounted can be
@@ -377,9 +393,7 @@ class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
   explicit RefCountedThreadSafe()
       : subtle::RefCountedThreadSafeBase(T::kRefCountPreference) {}
 
-  void AddRef() const {
-    subtle::RefCountedThreadSafeBase::AddRef();
-  }
+  void AddRef() const { AddRefImpl(T::kRefCountPreference); }
 
   void Release() const {
     if (subtle::RefCountedThreadSafeBase::Release()) {
@@ -398,6 +412,14 @@ class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
     delete x;
   }
 
+  void AddRefImpl(subtle::StartRefCountFromZeroTag) const {
+    subtle::RefCountedThreadSafeBase::AddRef();
+  }
+
+  void AddRefImpl(subtle::StartRefCountFromOneTag) const {
+    subtle::RefCountedThreadSafeBase::AddRefWithCheck();
+  }
+
   DISALLOW_COPY_AND_ASSIGN(RefCountedThreadSafe);
 };
 
@@ -412,6 +434,9 @@ class RefCountedData
   RefCountedData() : data() {}
   RefCountedData(const T& in_value) : data(in_value) {}
   RefCountedData(T&& in_value) : data(std::move(in_value)) {}
+  template <typename... Args>
+  explicit RefCountedData(in_place_t, Args&&... args)
+      : data(std::forward<Args>(args)...) {}
 
   T data;
 
@@ -419,6 +444,16 @@ class RefCountedData
   friend class base::RefCountedThreadSafe<base::RefCountedData<T> >;
   ~RefCountedData() = default;
 };
+
+template <typename T>
+bool operator==(const RefCountedData<T>& lhs, const RefCountedData<T>& rhs) {
+  return lhs.data == rhs.data;
+}
+
+template <typename T>
+bool operator!=(const RefCountedData<T>& lhs, const RefCountedData<T>& rhs) {
+  return !(lhs == rhs);
+}
 
 }  // namespace base
 

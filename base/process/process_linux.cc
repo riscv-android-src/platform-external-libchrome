@@ -7,19 +7,18 @@
 #include <errno.h>
 #include <sys/resource.h>
 
+#include "base/check.h"
 #include "base/files/file_util.h"
-#include "base/logging.h"
+#include "base/notreached.h"
+#include "base/posix/can_lower_nice_to.h"
+#include "base/process/internal_linux.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-
-// Not defined on AIX by default.
-#if defined(OS_AIX)
-#define RLIMIT_NICE 20
-#endif
+#include "build/chromeos_buildflags.h"
 
 namespace base {
 
@@ -27,7 +26,7 @@ namespace {
 
 const int kForegroundPriority = 0;
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 // We are more aggressive in our lowering of background process priority
 // for chromeos as we have much more control over other processes running
 // on the machine.
@@ -72,33 +71,43 @@ struct CGroups {
 };
 #else
 const int kBackgroundPriority = 5;
-#endif  // defined(OS_CHROMEOS)
-
-bool CanReraisePriority() {
-  // We won't be able to raise the priority if we don't have the right rlimit.
-  // The limit may be adjusted in /etc/security/limits.conf for PAM systems.
-  struct rlimit rlim;
-  return (getrlimit(RLIMIT_NICE, &rlim) == 0) &&
-         (20 - kForegroundPriority) <= static_cast<int>(rlim.rlim_cur);
-}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
 }  // namespace
 
+Time Process::CreationTime() const {
+  int64_t start_ticks = is_current()
+                            ? internal::ReadProcSelfStatsAndGetFieldAsInt64(
+                                  internal::VM_STARTTIME)
+                            : internal::ReadProcStatsAndGetFieldAsInt64(
+                                  Pid(), internal::VM_STARTTIME);
+
+  if (!start_ticks)
+    return Time();
+
+  TimeDelta start_offset = internal::ClockTicksToTimeDelta(start_ticks);
+  Time boot_time = internal::GetBootTime();
+  if (boot_time.is_null())
+    return Time();
+  return Time(boot_time + start_offset);
+}
+
 // static
 bool Process::CanBackgroundProcesses() {
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   if (CGroups::Get().enabled)
     return true;
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
-  static const bool can_reraise_priority = CanReraisePriority();
+  static const bool can_reraise_priority =
+      internal::CanLowerNiceTo(kForegroundPriority);
   return can_reraise_priority;
 }
 
 bool Process::IsProcessBackgrounded() const {
   DCHECK(IsValid());
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   if (CGroups::Get().enabled) {
     // Used to allow reading the process priority from proc on thread launch.
     base::ThreadRestrictions::ScopedAllowIO allow_io;
@@ -109,7 +118,7 @@ bool Process::IsProcessBackgrounded() const {
     }
     return false;
   }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
   return GetPriority() == kBackgroundPriority;
 }
@@ -117,14 +126,14 @@ bool Process::IsProcessBackgrounded() const {
 bool Process::SetProcessBackgrounded(bool background) {
   DCHECK(IsValid());
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
   if (CGroups::Get().enabled) {
-    std::string pid = IntToString(process_);
+    std::string pid = NumberToString(process_);
     const base::FilePath file = background ? CGroups::Get().background_file
                                            : CGroups::Get().foreground_file;
     return base::WriteFile(file, pid.c_str(), pid.size()) > 0;
   }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
   if (!CanBackgroundProcesses())
     return false;
@@ -135,7 +144,7 @@ bool Process::SetProcessBackgrounded(bool background) {
   return result == 0;
 }
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 bool IsProcessBackgroundedCGroup(const StringPiece& cgroup_contents) {
   // The process can be part of multiple control groups, and for each cgroup
   // hierarchy there's an entry in the file. We look for a control group
@@ -156,9 +165,9 @@ bool IsProcessBackgroundedCGroup(const StringPiece& cgroup_contents) {
 
   return false;
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 // Reads /proc/<pid>/status and returns the PID in its PID namespace.
 // If the process is not in a PID namespace or /proc/<pid>/status does not
 // report NSpid, kNullProcessId is returned.
@@ -168,7 +177,7 @@ ProcessId Process::GetPidInNamespace() const {
     // Synchronously reading files in /proc does not hit the disk.
     ThreadRestrictions::ScopedAllowIO allow_io;
     FilePath status_file =
-        FilePath("/proc").Append(IntToString(process_)).Append("status");
+        FilePath("/proc").Append(NumberToString(process_)).Append("status");
     if (!ReadFileToString(status_file, &status)) {
       return kNullProcessId;
     }
@@ -196,6 +205,6 @@ ProcessId Process::GetPidInNamespace() const {
   }
   return kNullProcessId;
 }
-#endif  // defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
 }  // namespace base

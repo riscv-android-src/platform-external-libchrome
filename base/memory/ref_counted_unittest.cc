@@ -8,8 +8,11 @@
 #include <utility>
 
 #include "base/test/gtest_util.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace base {
+namespace subtle {
 namespace {
 
 class SelfAssign : public base::RefCounted<SelfAssign> {
@@ -173,7 +176,16 @@ class CheckRefptrNull : public base::RefCounted<CheckRefptrNull> {
   scoped_refptr<CheckRefptrNull>* ptr_ = nullptr;
 };
 
-}  // end namespace
+class Overflow : public base::RefCounted<Overflow> {
+ public:
+  Overflow() = default;
+
+ private:
+  friend class base::RefCounted<Overflow>;
+  ~Overflow() = default;
+};
+
+}  // namespace
 
 TEST(RefCountedUnitTest, TestSelfAssignment) {
   SelfAssign* p = new SelfAssign;
@@ -643,6 +655,15 @@ TEST(RefCountedUnitTest, TestResetAlreadyNull) {
   EXPECT_EQ(obj.get(), nullptr);
 }
 
+TEST(RefCountedUnitTest, TestResetByNullptrAssignment) {
+  // Check that assigning nullptr resets the object.
+  auto obj = base::MakeRefCounted<ScopedRefPtrCountBase>();
+  EXPECT_NE(obj.get(), nullptr);
+
+  obj = nullptr;
+  EXPECT_EQ(obj.get(), nullptr);
+}
+
 TEST(RefCountedUnitTest, CheckScopedRefptrNullBeforeObjectDestruction) {
   scoped_refptr<CheckRefptrNull> obj = base::MakeRefCounted<CheckRefptrNull>();
   obj->set_scoped_refptr(&obj);
@@ -669,3 +690,16 @@ TEST(RefCountedDeathTest, TestAdoptRef) {
       base::MakeRefCounted<InitialRefCountIsOne>();
   EXPECT_DCHECK_DEATH(base::AdoptRef(obj.get()));
 }
+
+#if defined(ARCH_CPU_64_BITS)
+TEST(RefCountedDeathTest, TestOverflowCheck) {
+  auto p = base::MakeRefCounted<Overflow>();
+  p->ref_count_ = std::numeric_limits<uint32_t>::max();
+  EXPECT_CHECK_DEATH(p->AddRef());
+  // Ensure `p` doesn't leak and fail lsan builds.
+  p->ref_count_ = 1;
+}
+#endif
+
+}  // namespace subtle
+}  // namespace base

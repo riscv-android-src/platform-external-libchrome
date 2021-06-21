@@ -10,7 +10,6 @@
 #include <memory>
 
 #include "base/base_export.h"
-#include "base/logging.h"
 #include "base/scoped_generic.h"
 #include "build/build_config.h"
 
@@ -18,7 +17,15 @@ namespace base {
 
 namespace internal {
 
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if defined(OS_ANDROID)
+// Use fdsan on android.
+struct BASE_EXPORT ScopedFDCloseTraits : public ScopedGenericOwnershipTracking {
+  static int InvalidValue() { return -1; }
+  static void Free(int);
+  static void Acquire(const ScopedGeneric<int, ScopedFDCloseTraits>&, int);
+  static void Release(const ScopedGeneric<int, ScopedFDCloseTraits>&, int);
+};
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 struct BASE_EXPORT ScopedFDCloseTraits {
   static int InvalidValue() {
     return -1;

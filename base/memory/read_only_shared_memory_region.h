@@ -33,6 +33,7 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
   // the region content. If you need to pass write access to another process,
   // consider using WritableSharedMemoryRegion or UnsafeSharedMemoryRegion.
   static MappedReadOnlyRegion Create(size_t size);
+  using CreateFunction = decltype(Create);
 
   // Returns a ReadOnlySharedMemoryRegion built from a platform-specific handle
   // that was taken from another ReadOnlySharedMemoryRegion instance. Returns an
@@ -95,9 +96,22 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
     return handle_.GetGUID();
   }
 
+  // Returns a platform shared memory handle. |this| remains the owner of the
+  // handle.
+  subtle::PlatformSharedMemoryRegion::PlatformHandle GetPlatformHandle() const {
+    DCHECK(IsValid());
+    return handle_.GetPlatformHandle();
+  }
+
  private:
+  friend class SharedMemoryHooks;
+
   explicit ReadOnlySharedMemoryRegion(
       subtle::PlatformSharedMemoryRegion handle);
+
+  static void set_create_hook(CreateFunction* hook) { create_hook_ = hook; }
+
+  static CreateFunction* create_hook_;
 
   subtle::PlatformSharedMemoryRegion handle_;
 
@@ -111,7 +125,7 @@ struct MappedReadOnlyRegion {
   // Helper function to check return value of
   // ReadOnlySharedMemoryRegion::Create(). |region| and |mapping| either both
   // valid or invalid.
-  bool IsValid() {
+  bool IsValid() const {
     DCHECK_EQ(region.IsValid(), mapping.IsValid());
     return region.IsValid() && mapping.IsValid();
   }

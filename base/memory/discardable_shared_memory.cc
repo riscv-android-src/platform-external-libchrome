@@ -8,14 +8,17 @@
 
 #include <algorithm>
 
+#include "base/allocator/partition_allocator/page_allocator.h"
 #include "base/atomicops.h"
 #include "base/bits.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
+#include "base/memory/discardable_memory.h"
+#include "base/memory/discardable_memory_internal.h"
 #include "base/memory/shared_memory_tracker.h"
 #include "base/numerics/safe_math.h"
 #include "base/process/process_metrics.h"
-#include "base/trace_event/memory_allocator_dump.h"
-#include "base/trace_event/process_memory_dump.h"
+#include "base/tracing_buildflags.h"
 #include "build/build_config.h"
 
 #if defined(OS_POSIX) && !defined(OS_NACL)
@@ -31,6 +34,17 @@
 #include <windows.h>
 #include "base/win/windows_version.h"
 #endif
+
+#if defined(OS_FUCHSIA)
+#include <lib/zx/vmar.h>
+#include <zircon/types.h>
+#include "base/fuchsia/fuchsia_logging.h"
+#endif
+
+#if BUILDFLAG(ENABLE_BASE_TRACING)
+#include "base/trace_event/memory_allocator_dump.h"  // no-presubmit-check
+#include "base/trace_event/process_memory_dump.h"    // no-presubmit-check
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 
 namespace base {
 namespace {
@@ -105,8 +119,23 @@ SharedState* SharedStateFromSharedMemory(
 
 // Round up |size| to a multiple of page size.
 size_t AlignToPageSize(size_t size) {
-  return bits::Align(size, base::GetPageSize());
+  return bits::AlignUp(size, base::GetPageSize());
 }
+
+#if defined(OS_ANDROID)
+bool UseAshmemUnpinningForDiscardableMemory() {
+  if (!ashmem_device_is_supported())
+    return false;
+
+  // If we are participating in the discardable memory backing trial, only
+  // enable ashmem unpinning when we are in the corresponding trial group.
+  if (base::DiscardableMemoryBackingFieldTrialIsEnabled()) {
+    return base::GetDiscardableMemoryBackingFieldTrialGroup() ==
+           base::DiscardableMemoryTrialGroup::kAshmem;
+  }
+  return true;
+}
+#endif  // defined(OS_ANDROID)
 
 }  // namespace
 
@@ -250,7 +279,7 @@ DiscardableSharedMemory::LockResult DiscardableSharedMemory::Lock(
   // Ensure that the platform won't discard the required pages.
   return LockPages(shared_memory_region_,
                    AlignToPageSize(sizeof(SharedState)) + offset, length);
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
   // On macOS, there is no mechanism to lock pages. However, we do need to call
   // madvise(MADV_FREE_REUSE) in order to correctly update accounting for memory
   // footprint via task_info().
@@ -264,10 +293,9 @@ DiscardableSharedMemory::LockResult DiscardableSharedMemory::Lock(
   //
   // For more information, see
   // https://bugs.chromium.org/p/chromium/issues/detail?id=823915.
-  if (madvise(reinterpret_cast<char*>(shared_memory_mapping_.memory()) +
-                  AlignToPageSize(sizeof(SharedState)),
-              AlignToPageSize(mapped_size_), MADV_FREE_REUSE))
-    ;
+  madvise(static_cast<char*>(shared_memory_mapping_.memory()) +
+              AlignToPageSize(sizeof(SharedState)),
+          AlignToPageSize(mapped_size_), MADV_FREE_REUSE);
   return DiscardableSharedMemory::SUCCESS;
 #else
   return DiscardableSharedMemory::SUCCESS;
@@ -336,7 +364,7 @@ void DiscardableSharedMemory::Unlock(size_t offset, size_t length) {
 }
 
 void* DiscardableSharedMemory::memory() const {
-  return reinterpret_cast<uint8_t*>(shared_memory_mapping_.memory()) +
+  return static_cast<uint8_t*>(shared_memory_mapping_.memory()) +
          AlignToPageSize(sizeof(SharedState));
 }
 
@@ -373,9 +401,9 @@ bool DiscardableSharedMemory::Purge(Time current_time) {
 // Linux and Android provide MADV_REMOVE which is preferred as it has a
 // behavior that can be verified in tests. Other POSIX flavors (MacOSX, BSDs),
 // provide MADV_FREE which has the same result but memory is purged lazily.
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 #define MADV_PURGE_ARGUMENT MADV_REMOVE
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
 // MADV_FREE_REUSABLE is similar to MADV_FREE, but also marks the pages with the
 // reusable bit, which allows both Activity Monitor and memory-infra to
 // correctly track the pages.
@@ -386,35 +414,80 @@ bool DiscardableSharedMemory::Purge(Time current_time) {
   // Advise the kernel to remove resources associated with purged pages.
   // Subsequent accesses of memory pages will succeed, but might result in
   // zero-fill-on-demand pages.
-  if (madvise(reinterpret_cast<char*>(shared_memory_mapping_.memory()) +
+  if (madvise(static_cast<char*>(shared_memory_mapping_.memory()) +
                   AlignToPageSize(sizeof(SharedState)),
               AlignToPageSize(mapped_size_), MADV_PURGE_ARGUMENT)) {
     DPLOG(ERROR) << "madvise() failed";
   }
 #elif defined(OS_WIN)
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8_1) {
-    // Discard the purged pages, which releases the physical storage (resident
-    // memory, compressed or swapped), but leaves them reserved & committed.
-    // This does not free commit for use by other applications, but allows the
-    // system to avoid compressing/swapping these pages to free physical memory.
-    static const auto discard_virtual_memory =
-        reinterpret_cast<decltype(&::DiscardVirtualMemory)>(GetProcAddress(
-            GetModuleHandle(L"kernel32.dll"), "DiscardVirtualMemory"));
-    if (discard_virtual_memory) {
-      DWORD discard_result = discard_virtual_memory(
-          reinterpret_cast<char*>(shared_memory_mapping_.memory()) +
-              AlignToPageSize(sizeof(SharedState)),
-          AlignToPageSize(mapped_size_));
-      if (discard_result != ERROR_SUCCESS) {
-        DLOG(DCHECK) << "DiscardVirtualMemory() failed in Purge(): "
-                     << logging::SystemErrorCodeToString(discard_result);
-      }
-    }
+  // On Windows, discarded pages are not returned to the system immediately and
+  // not guaranteed to be zeroed when returned to the application.
+  using DiscardVirtualMemoryFunction =
+      DWORD(WINAPI*)(PVOID virtualAddress, SIZE_T size);
+  static DiscardVirtualMemoryFunction discard_virtual_memory =
+      reinterpret_cast<DiscardVirtualMemoryFunction>(GetProcAddress(
+          GetModuleHandle(L"Kernel32.dll"), "DiscardVirtualMemory"));
+
+  char* address = static_cast<char*>(shared_memory_mapping_.memory()) +
+                  AlignToPageSize(sizeof(SharedState));
+  size_t length = AlignToPageSize(mapped_size_);
+
+  // Use DiscardVirtualMemory when available because it releases faster than
+  // MEM_RESET.
+  DWORD ret = ERROR_NOT_SUPPORTED;
+  if (discard_virtual_memory) {
+    ret = discard_virtual_memory(address, length);
   }
-#endif
+
+  // DiscardVirtualMemory is buggy in Win10 SP0, so fall back to MEM_RESET on
+  // failure.
+  if (ret != ERROR_SUCCESS) {
+    void* ptr = VirtualAlloc(address, length, MEM_RESET, PAGE_READWRITE);
+    CHECK(ptr);
+  }
+#elif defined(OS_FUCHSIA)
+  // De-commit via our VMAR, rather than relying on the VMO handle, since the
+  // handle may have been closed after the memory was mapped into this process.
+  uint64_t address_int = reinterpret_cast<uint64_t>(
+      static_cast<char*>(shared_memory_mapping_.memory()) +
+      AlignToPageSize(sizeof(SharedState)));
+  zx_status_t status = zx::vmar::root_self()->op_range(
+      ZX_VMO_OP_DECOMMIT, address_int, AlignToPageSize(mapped_size_), nullptr,
+      0);
+  ZX_DCHECK(status == ZX_OK, status) << "zx_vmo_op_range(ZX_VMO_OP_DECOMMIT)";
+#endif  // defined(OS_FUCHSIA)
 
   last_known_usage_ = Time();
   return true;
+}
+
+void DiscardableSharedMemory::ReleaseMemoryIfPossible(size_t offset,
+                                                      size_t length) {
+#if defined(OS_POSIX) && !defined(OS_NACL)
+// Linux and Android provide MADV_REMOVE which is preferred as it has a
+// behavior that can be verified in tests. Other POSIX flavors (MacOSX, BSDs),
+// provide MADV_FREE which has the same result but memory is purged lazily.
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#define MADV_PURGE_ARGUMENT MADV_REMOVE
+#elif defined(OS_APPLE)
+// MADV_FREE_REUSABLE is similar to MADV_FREE, but also marks the pages with the
+// reusable bit, which allows both Activity Monitor and memory-infra to
+// correctly track the pages.
+#define MADV_PURGE_ARGUMENT MADV_FREE_REUSABLE
+#else  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#define MADV_PURGE_ARGUMENT MADV_FREE
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
+  // Advise the kernel to remove resources associated with purged pages.
+  // Subsequent accesses of memory pages will succeed, but might result in
+  // zero-fill-on-demand pages.
+  if (madvise(static_cast<char*>(shared_memory_mapping_.memory()) + offset,
+              length, MADV_PURGE_ARGUMENT)) {
+    DPLOG(ERROR) << "madvise() failed";
+  }
+#else   // defined(OS_POSIX) && !defined(OS_NACL)
+  DiscardSystemPages(
+      static_cast<char*>(shared_memory_mapping_.memory()) + offset, length);
+#endif  // defined(OS_POSIX) && !defined(OS_NACL)
 }
 
 bool DiscardableSharedMemory::IsMemoryResident() const {
@@ -444,6 +517,8 @@ void DiscardableSharedMemory::CreateSharedMemoryOwnershipEdge(
     trace_event::MemoryAllocatorDump* local_segment_dump,
     trace_event::ProcessMemoryDump* pmd,
     bool is_owned) const {
+// Memory dumps are only supported when tracing support is enabled,.
+#if BUILDFLAG(ENABLE_BASE_TRACING)
   auto* shared_memory_dump = SharedMemoryTracker::GetOrCreateSharedMemoryDump(
       shared_memory_mapping_, pmd);
   // TODO(ssid): Clean this by a new api to inherit size of parent dump once the
@@ -473,6 +548,7 @@ void DiscardableSharedMemory::CreateSharedMemoryOwnershipEdge(
     pmd->CreateSharedMemoryOwnershipEdge(local_segment_dump->guid(),
                                          shared_memory_guid, kImportance);
   }
+#endif  // BUILDFLAG(ENABLE_BASE_TRACING)
 }
 
 // static
@@ -482,12 +558,14 @@ DiscardableSharedMemory::LockResult DiscardableSharedMemory::LockPages(
     size_t length) {
 #if defined(OS_ANDROID)
   if (region.IsValid()) {
-    int pin_result =
-        ashmem_pin_region(region.GetPlatformHandle(), offset, length);
-    if (pin_result == ASHMEM_WAS_PURGED)
-      return PURGED;
-    if (pin_result < 0)
-      return FAILED;
+    if (UseAshmemUnpinningForDiscardableMemory()) {
+      int pin_result =
+          ashmem_pin_region(region.GetPlatformHandle(), offset, length);
+      if (pin_result == ASHMEM_WAS_PURGED)
+        return PURGED;
+      if (pin_result < 0)
+        return FAILED;
+    }
   }
 #endif
   return SUCCESS;
@@ -500,9 +578,11 @@ void DiscardableSharedMemory::UnlockPages(
     size_t length) {
 #if defined(OS_ANDROID)
   if (region.IsValid()) {
-    int unpin_result =
-        ashmem_unpin_region(region.GetPlatformHandle(), offset, length);
-    DCHECK_EQ(0, unpin_result);
+    if (UseAshmemUnpinningForDiscardableMemory()) {
+      int unpin_result =
+          ashmem_unpin_region(region.GetPlatformHandle(), offset, length);
+      DCHECK_EQ(0, unpin_result);
+    }
   }
 #endif
 }
@@ -510,5 +590,12 @@ void DiscardableSharedMemory::UnlockPages(
 Time DiscardableSharedMemory::Now() const {
   return Time::Now();
 }
+
+#if defined(OS_ANDROID)
+// static
+bool DiscardableSharedMemory::IsAshmemDeviceSupportedForTesting() {
+  return UseAshmemUnpinningForDiscardableMemory();
+}
+#endif
 
 }  // namespace base

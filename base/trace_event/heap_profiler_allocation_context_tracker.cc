@@ -4,14 +4,19 @@
 
 #include "base/trace_event/heap_profiler_allocation_context_tracker.h"
 
+#include <string.h>
+
 #include <algorithm>
 #include <iterator>
 
 #include "base/atomicops.h"
+#include "base/check_op.h"
 #include "base/debug/debugging_buildflags.h"
 #include "base/debug/leak_annotations.h"
 #include "base/debug/stack_trace.h"
 #include "base/no_destructor.h"
+#include "base/notreached.h"
+#include "base/stl_util.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_local_storage.h"
 #include "base/trace_event/heap_profiler_allocation_context.h"
@@ -21,7 +26,7 @@
 #include "base/trace_event/cfi_backtrace_android.h"
 #endif
 
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 #include <sys/prctl.h>
 #endif
 
@@ -57,7 +62,7 @@ ThreadLocalStorage::Slot& AllocationContextTrackerTLS() {
 // are used to tag allocations even after the thread dies.
 const char* GetAndLeakThreadName() {
   char name[16];
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
   // If the thread name is not set, try to get it from prctl. Thread name might
   // not be set in cases where the thread started before heap profiling was
   // enabled.
@@ -65,7 +70,7 @@ const char* GetAndLeakThreadName() {
   if (!err) {
     return strdup(name);
   }
-#endif  // defined(OS_LINUX) || defined(OS_ANDROID)
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
 
   // Use tid if we don't have a thread name.
   snprintf(name, sizeof(name), "%lu",
@@ -92,10 +97,10 @@ AllocationContextTracker::GetInstanceForCurrentThread() {
   return tracker;
 }
 
-AllocationContextTracker::AllocationContextTracker()
-    : thread_name_(nullptr), ignore_scope_depth_(0) {
+AllocationContextTracker::AllocationContextTracker() {
   tracked_stack_.reserve(kMaxStackDepth);
   task_contexts_.reserve(kMaxTaskDepth);
+  task_contexts_.push_back("UntrackedTask");
 }
 AllocationContextTracker::~AllocationContextTracker() = default;
 
@@ -162,8 +167,8 @@ void AllocationContextTracker::PushCurrentTaskContext(const char* context) {
 void AllocationContextTracker::PopCurrentTaskContext(const char* context) {
   // Guard for stack underflow. If tracing was started with a TRACE_EVENT in
   // scope, the context was never pushed, so it is possible that pop is called
-  // on an empty stack.
-  if (task_contexts_.empty())
+  // on an empty stack. Note that the context always contains "UntrackedTask".
+  if (task_contexts_.size() == 1)
     return;
 
   DCHECK_EQ(context, task_contexts_.back())
@@ -221,17 +226,17 @@ bool AllocationContextTracker::GetContextSnapshot(AllocationContext* ctx) {
 #if !defined(OS_NACL)  // We don't build base/debug/stack_trace.cc for NaCl.
 #if defined(OS_ANDROID) && BUILDFLAG(CAN_UNWIND_WITH_CFI_TABLE)
         const void* frames[Backtrace::kMaxFrameCount + 1];
-        static_assert(arraysize(frames) >= Backtrace::kMaxFrameCount,
+        static_assert(base::size(frames) >= Backtrace::kMaxFrameCount,
                       "not requesting enough frames to fill Backtrace");
         size_t frame_count =
             CFIBacktraceAndroid::GetInitializedInstance()->Unwind(
-                frames, arraysize(frames));
+                frames, base::size(frames));
 #elif BUILDFLAG(CAN_UNWIND_WITH_FRAME_POINTERS)
         const void* frames[Backtrace::kMaxFrameCount + 1];
-        static_assert(arraysize(frames) >= Backtrace::kMaxFrameCount,
+        static_assert(base::size(frames) >= Backtrace::kMaxFrameCount,
                       "not requesting enough frames to fill Backtrace");
         size_t frame_count = debug::TraceStackFramePointers(
-            frames, arraysize(frames),
+            frames, base::size(frames),
             1 /* exclude this function from the trace */);
 #else
         // Fall-back to capturing the stack with base::debug::StackTrace,
@@ -259,13 +264,7 @@ bool AllocationContextTracker::GetContextSnapshot(AllocationContext* ctx) {
 
   ctx->backtrace.frame_count = backtrace - std::begin(ctx->backtrace.frames);
 
-  // TODO(ssid): Fix crbug.com/594803 to add file name as 3rd dimension
-  // (component name) in the heap profiler and not piggy back on the type name.
-  if (!task_contexts_.empty()) {
-    ctx->type_name = task_contexts_.back();
-  } else {
-    ctx->type_name = nullptr;
-  }
+  ctx->type_name = TaskContext();
 
   return true;
 }

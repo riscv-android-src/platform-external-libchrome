@@ -11,7 +11,7 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -37,7 +37,7 @@ const char testrawstring[] = "Hello new world"; // Test raw string writing
 // Test raw char16 writing, assumes UTF16 encoding is ANSI for alpha chars.
 const char16 testrawstring16[] = {'A', 'l', 'o', 'h', 'a', 0};
 const char testdata[] = "AAA\0BBB\0";
-const int testdatalen = arraysize(testdata) - 1;
+const int testdatalen = base::size(testdata) - 1;
 
 // checks that the results can be read correctly from the Pickle
 void VerifyResult(const Pickle& pickle) {
@@ -568,6 +568,32 @@ TEST(PickleTest, ClaimBytes) {
   int out_value;
   EXPECT_TRUE(iter.ReadInt(&out_value));
   EXPECT_EQ(42, out_value);
+}
+
+TEST(PickleTest, ReachedEnd) {
+  Pickle pickle;
+  pickle.WriteInt(1);
+  pickle.WriteInt(2);
+  pickle.WriteInt(3);
+
+  PickleIterator iter(pickle);
+  int out;
+
+  EXPECT_FALSE(iter.ReachedEnd());
+  EXPECT_TRUE(iter.ReadInt(&out));
+  EXPECT_EQ(1, out);
+
+  EXPECT_FALSE(iter.ReachedEnd());
+  EXPECT_TRUE(iter.ReadInt(&out));
+  EXPECT_EQ(2, out);
+
+  EXPECT_FALSE(iter.ReachedEnd());
+  EXPECT_TRUE(iter.ReadInt(&out));
+  EXPECT_EQ(3, out);
+
+  EXPECT_TRUE(iter.ReachedEnd());
+  EXPECT_FALSE(iter.ReadInt(&out));
+  EXPECT_TRUE(iter.ReachedEnd());
 }
 
 }  // namespace base

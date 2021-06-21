@@ -6,10 +6,11 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 
+#include "base/files/file.h"
 #include "base/files/file_util.h"
-#include "base/numerics/checked_math.h"
+#include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 
@@ -35,14 +36,16 @@ using ScopedPathUnlinker =
 bool CheckFDAccessMode(int fd, int expected_mode) {
   int fd_status = fcntl(fd, F_GETFL);
   if (fd_status == -1) {
-    DPLOG(ERROR) << "fcntl(" << fd << ", F_GETFL) failed";
+    // TODO(crbug.com/838365): convert to DLOG when bug fixed.
+    PLOG(ERROR) << "fcntl(" << fd << ", F_GETFL) failed";
     return false;
   }
 
   int mode = fd_status & O_ACCMODE;
   if (mode != expected_mode) {
-    DLOG(ERROR) << "Descriptor access mode (" << mode
-                << ") differs from expected (" << expected_mode << ")";
+    // TODO(crbug.com/838365): convert to DLOG when bug fixed.
+    LOG(ERROR) << "Descriptor access mode (" << mode
+               << ") differs from expected (" << expected_mode << ")";
     return false;
   }
 
@@ -66,6 +69,17 @@ ScopedFDPair::ScopedFDPair(ScopedFD in_fd, ScopedFD in_readonly_fd)
 FDPair ScopedFDPair::get() const {
   return {fd.get(), readonly_fd.get()};
 }
+
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+// static
+ScopedFD PlatformSharedMemoryRegion::ExecutableRegion::CreateFD(size_t size) {
+  PlatformSharedMemoryRegion region =
+      Create(Mode::kUnsafe, size, true /* executable */);
+  if (region.IsValid())
+    return region.PassPlatformHandle().fd;
+  return ScopedFD();
+}
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
@@ -107,6 +121,16 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
   }
 
   return PlatformSharedMemoryRegion(std::move(handle), mode, size, guid);
+}
+
+// static
+PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
+    ScopedFD handle,
+    Mode mode,
+    size_t size,
+    const UnguessableToken& guid) {
+  CHECK_NE(mode, Mode::kWritable);
+  return Take(ScopedFDPair(std::move(handle), ScopedFD()), mode, size, guid);
 }
 
 FDPair PlatformSharedMemoryRegion::GetPlatformHandle() const {
@@ -159,18 +183,10 @@ bool PlatformSharedMemoryRegion::ConvertToUnsafe() {
   return true;
 }
 
-bool PlatformSharedMemoryRegion::MapAt(off_t offset,
-                                       size_t size,
-                                       void** memory,
-                                       size_t* mapped_size) const {
-  if (!IsValid())
-    return false;
-
-  size_t end_byte;
-  if (!CheckAdd(offset, size).AssignIfValid(&end_byte) || end_byte > size_) {
-    return false;
-  }
-
+bool PlatformSharedMemoryRegion::MapAtInternal(off_t offset,
+                                               size_t size,
+                                               void** memory,
+                                               size_t* mapped_size) const {
   bool write_allowed = mode_ != Mode::kReadOnly;
   *memory = mmap(nullptr, size, PROT_READ | (write_allowed ? PROT_WRITE : 0),
                  MAP_SHARED, handle_.fd.get(), offset);
@@ -182,23 +198,28 @@ bool PlatformSharedMemoryRegion::MapAt(off_t offset,
   }
 
   *mapped_size = size;
-  DCHECK_EQ(0U,
-            reinterpret_cast<uintptr_t>(*memory) & (kMapMinimumAlignment - 1));
   return true;
 }
 
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
-                                                              size_t size) {
+                                                              size_t size
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+                                                              ,
+                                                              bool executable
+#endif
+) {
 #if defined(OS_NACL)
   // Untrusted code can't create descriptors or handles.
   return {};
 #else
-  if (size == 0)
+  if (size == 0) {
     return {};
+  }
 
-  if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
+  if (size > static_cast<size_t>(std::numeric_limits<int>::max())) {
     return {};
+  }
 
   CHECK_NE(mode, Mode::kReadOnly) << "Creating a region in read-only mode will "
                                      "lead to this region being non-modifiable";
@@ -211,14 +232,21 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
   // We don't use shm_open() API in order to support the --disable-dev-shm-usage
   // flag.
   FilePath directory;
-  if (!GetShmemTempDir(false /* executable */, &directory))
+  if (!GetShmemTempDir(
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+          executable,
+#else
+          false /* executable */,
+#endif
+          &directory)) {
     return {};
+  }
 
-  ScopedFD fd;
   FilePath path;
-  fd.reset(CreateAndOpenFdForTemporaryFileInDir(directory, &path));
+  ScopedFD fd = CreateAndOpenFdForTemporaryFileInDir(directory, &path);
+  File shm_file(fd.release());
 
-  if (!fd.is_valid()) {
+  if (!shm_file.IsValid()) {
     PLOG(ERROR) << "Creating shared memory in " << path.value() << " failed";
     FilePath dir = path.DirName();
     if (access(dir.value().c_str(), W_OK | X_OK) < 0) {
@@ -246,30 +274,33 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
     }
   }
 
-  // Get current size.
-  struct stat stat = {};
-  if (fstat(fd.get(), &stat) != 0)
+  if (!AllocateFileRegion(&shm_file, 0, size)) {
     return {};
-  const size_t current_size = stat.st_size;
-  if (current_size != size) {
-    if (HANDLE_EINTR(ftruncate(fd.get(), size)) != 0)
-      return {};
   }
 
   if (readonly_fd.is_valid()) {
-    struct stat readonly_stat = {};
-    if (fstat(readonly_fd.get(), &readonly_stat))
-      NOTREACHED();
+    stat_wrapper_t shm_stat;
+    if (File::Fstat(shm_file.GetPlatformFile(), &shm_stat) != 0) {
+      DPLOG(ERROR) << "fstat(fd) failed";
+      return {};
+    }
 
-    if (stat.st_dev != readonly_stat.st_dev ||
-        stat.st_ino != readonly_stat.st_ino) {
+    stat_wrapper_t readonly_stat;
+    if (File::Fstat(readonly_fd.get(), &readonly_stat) != 0) {
+      DPLOG(ERROR) << "fstat(readonly_fd) failed";
+      return {};
+    }
+
+    if (shm_stat.st_dev != readonly_stat.st_dev ||
+        shm_stat.st_ino != readonly_stat.st_ino) {
       LOG(ERROR) << "Writable and read-only inodes don't match; bailing";
       return {};
     }
   }
 
-  return PlatformSharedMemoryRegion({std::move(fd), std::move(readonly_fd)},
-                                    mode, size, UnguessableToken::Create());
+  return PlatformSharedMemoryRegion(
+      {ScopedFD(shm_file.TakePlatformFile()), std::move(readonly_fd)}, mode,
+      size, UnguessableToken::Create());
 #endif  // !defined(OS_NACL)
 }
 
@@ -288,31 +319,16 @@ bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
 
   // The second descriptor must be invalid in kReadOnly and kUnsafe modes.
   if (handle.readonly_fd != -1) {
-    DLOG(ERROR) << "The second descriptor must be invalid";
+    // TODO(crbug.com/838365): convert to DLOG when bug fixed.
+    LOG(ERROR) << "The second descriptor must be invalid";
     return false;
   }
 
   return true;
 #else
   // fcntl(_, F_GETFL) is not implemented on NaCl.
-  void* temp_memory = nullptr;
-  temp_memory =
-      mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, handle.fd, 0);
-
-  bool mmap_succeeded = temp_memory && temp_memory != MAP_FAILED;
-  if (mmap_succeeded)
-    munmap(temp_memory, size);
-
-  bool is_read_only = !mmap_succeeded;
-  bool expected_read_only = mode == Mode::kReadOnly;
-
-  if (is_read_only != expected_read_only) {
-    DLOG(ERROR) << "Descriptor has a wrong access mode: it is"
-                << (is_read_only ? " " : " not ") << "read-only but it should"
-                << (expected_read_only ? " " : " not ") << "be";
-    return false;
-  }
-
+  // We also cannot try to mmap() a region as writable and look at the return
+  // status because the plugin process crashes if system mmap() fails.
   return true;
 #endif  // !defined(OS_NACL)
 }

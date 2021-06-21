@@ -16,6 +16,7 @@
 #include "base/metrics/metrics_hashes.h"
 #include "base/metrics/persistent_histogram_allocator.h"
 #include "base/metrics/record_histogram_checker.h"
+#include "base/ranges/algorithm.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -38,6 +39,13 @@ StatisticsRecorder* StatisticsRecorder::top_ = nullptr;
 
 // static
 bool StatisticsRecorder::is_vlog_initialized_ = false;
+
+// static
+std::atomic<bool> StatisticsRecorder::have_active_callbacks_{false};
+
+// static
+std::atomic<StatisticsRecorder::GlobalSampleCallback>
+    StatisticsRecorder::global_sample_callback_{nullptr};
 
 size_t StatisticsRecorder::BucketRangesHash::operator()(
     const BucketRanges* const a) const {
@@ -135,16 +143,6 @@ const BucketRanges* StatisticsRecorder::RegisterOrDeleteDuplicateRanges(
 }
 
 // static
-void StatisticsRecorder::WriteHTMLGraph(const std::string& query,
-                                        std::string* output) {
-  for (const HistogramBase* const histogram :
-       Sort(WithName(GetHistograms(), query))) {
-    histogram->WriteHTMLGraph(output);
-    *output += "<br><hr><br>";
-  }
-}
-
-// static
 void StatisticsRecorder::WriteGraph(const std::string& query,
                                     std::string* output) {
   if (query.length())
@@ -237,19 +235,22 @@ void StatisticsRecorder::InitLogOnShutdown() {
 }
 
 // static
-bool StatisticsRecorder::SetCallback(
-    const std::string& name,
-    const StatisticsRecorder::OnSampleCallback& cb) {
+bool StatisticsRecorder::SetCallback(const std::string& name,
+                                     StatisticsRecorder::OnSampleCallback cb) {
   DCHECK(!cb.is_null());
   const AutoLock auto_lock(lock_.Get());
   EnsureGlobalRecorderWhileLocked();
 
-  if (!top_->callbacks_.insert({name, cb}).second)
+  if (!top_->callbacks_.insert({name, std::move(cb)}).second)
     return false;
 
   const HistogramMap::const_iterator it = top_->histograms_.find(name);
   if (it != top_->histograms_.end())
     it->second->SetFlags(HistogramBase::kCallbackExists);
+
+  have_active_callbacks_.store(
+      global_sample_callback() || !top_->callbacks_.empty(),
+      std::memory_order_relaxed);
 
   return true;
 }
@@ -265,6 +266,10 @@ void StatisticsRecorder::ClearCallback(const std::string& name) {
   const HistogramMap::const_iterator it = top_->histograms_.find(name);
   if (it != top_->histograms_.end())
     it->second->ClearFlags(HistogramBase::kCallbackExists);
+
+  have_active_callbacks_.store(
+      global_sample_callback() || !top_->callbacks_.empty(),
+      std::memory_order_relaxed);
 }
 
 // static
@@ -274,6 +279,20 @@ StatisticsRecorder::OnSampleCallback StatisticsRecorder::FindCallback(
   EnsureGlobalRecorderWhileLocked();
   const auto it = top_->callbacks_.find(name);
   return it != top_->callbacks_.end() ? it->second : OnSampleCallback();
+}
+
+// static
+void StatisticsRecorder::SetGlobalSampleCallback(
+    const GlobalSampleCallback& new_global_sample_callback) {
+  const AutoLock auto_lock(lock_.Get());
+  EnsureGlobalRecorderWhileLocked();
+
+  DCHECK(!global_sample_callback() || !new_global_sample_callback);
+  global_sample_callback_.store(new_global_sample_callback);
+
+  have_active_callbacks_.store(
+      new_global_sample_callback || !top_->callbacks_.empty(),
+      std::memory_order_relaxed);
 }
 
 // static
@@ -348,7 +367,7 @@ StatisticsRecorder::Histograms StatisticsRecorder::GetHistograms() {
 
 // static
 StatisticsRecorder::Histograms StatisticsRecorder::Sort(Histograms histograms) {
-  std::sort(histograms.begin(), histograms.end(), &HistogramNameLesser);
+  ranges::sort(histograms, &HistogramNameLesser);
   return histograms;
 }
 
@@ -358,12 +377,12 @@ StatisticsRecorder::Histograms StatisticsRecorder::WithName(
     const std::string& query) {
   // Need a C-string query for comparisons against C-string histogram name.
   const char* const query_string = query.c_str();
-  histograms.erase(std::remove_if(histograms.begin(), histograms.end(),
-                                  [query_string](const HistogramBase* const h) {
-                                    return !strstr(h->histogram_name(),
-                                                   query_string);
-                                  }),
-                   histograms.end());
+  histograms.erase(
+      ranges::remove_if(histograms,
+                        [query_string](const HistogramBase* const h) {
+                          return !strstr(h->histogram_name(), query_string);
+                        }),
+      histograms.end());
   return histograms;
 }
 
@@ -371,10 +390,11 @@ StatisticsRecorder::Histograms StatisticsRecorder::WithName(
 StatisticsRecorder::Histograms StatisticsRecorder::NonPersistent(
     Histograms histograms) {
   histograms.erase(
-      std::remove_if(histograms.begin(), histograms.end(),
-                     [](const HistogramBase* const h) {
-                       return (h->flags() & HistogramBase::kIsPersistent) != 0;
-                     }),
+      ranges::remove_if(histograms,
+                        [](const HistogramBase* const h) {
+                          return (h->flags() & HistogramBase::kIsPersistent) !=
+                                 0;
+                        }),
       histograms.end());
   return histograms;
 }

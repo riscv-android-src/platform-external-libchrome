@@ -7,58 +7,29 @@
 
 #include "build/build_config.h"
 
-#if defined(ANDROID)
-// Prefer Android's libbase definitions to our own.
-#include <android-base/macros.h>
-#endif  // defined(ANDROID)
+#if defined(COMPILER_MSVC) && !defined(__clang__)
+#error "Only clang-cl is supported on Windows, see https://crbug.com/988071"
+#endif
 
-#if defined(COMPILER_MSVC)
-
-// For _Printf_format_string_.
-#include <sal.h>
-
-// Macros for suppressing and disabling warnings on MSVC.
+// This is a wrapper around `__has_cpp_attribute`, which can be used to test for
+// the presence of an attribute. In case the compiler does not support this
+// macro it will simply evaluate to 0.
 //
-// Warning numbers are enumerated at:
-// http://msdn.microsoft.com/en-us/library/8x5x43k7(VS.80).aspx
-//
-// The warning pragma:
-// http://msdn.microsoft.com/en-us/library/2c8f766e(VS.80).aspx
-//
-// Using __pragma instead of #pragma inside macros:
-// http://msdn.microsoft.com/en-us/library/d9x1s805.aspx
+// References:
+// https://wg21.link/sd6#testing-for-the-presence-of-an-attribute-__has_cpp_attribute
+// https://wg21.link/cpp.cond#:__has_cpp_attribute
+#if defined(__has_cpp_attribute)
+#define HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#define HAS_CPP_ATTRIBUTE(x) 0
+#endif
 
-// MSVC_SUPPRESS_WARNING disables warning |n| for the remainder of the line and
-// for the next line of the source file.
-#define MSVC_SUPPRESS_WARNING(n) __pragma(warning(suppress:n))
-
-// MSVC_PUSH_DISABLE_WARNING pushes |n| onto a stack of warnings to be disabled.
-// The warning remains disabled until popped by MSVC_POP_WARNING.
-#define MSVC_PUSH_DISABLE_WARNING(n) __pragma(warning(push)) \
-                                     __pragma(warning(disable:n))
-
-// MSVC_PUSH_WARNING_LEVEL pushes |n| as the global warning level.  The level
-// remains in effect until popped by MSVC_POP_WARNING().  Use 0 to disable all
-// warnings.
-#define MSVC_PUSH_WARNING_LEVEL(n) __pragma(warning(push, n))
-
-// Pop effects of innermost MSVC_PUSH_* macro.
-#define MSVC_POP_WARNING() __pragma(warning(pop))
-
-#define MSVC_DISABLE_OPTIMIZE() __pragma(optimize("", off))
-#define MSVC_ENABLE_OPTIMIZE() __pragma(optimize("", on))
-
-#else  // Not MSVC
-
-#define _Printf_format_string_
-#define MSVC_SUPPRESS_WARNING(n)
-#define MSVC_PUSH_DISABLE_WARNING(n)
-#define MSVC_PUSH_WARNING_LEVEL(n)
-#define MSVC_POP_WARNING()
-#define MSVC_DISABLE_OPTIMIZE()
-#define MSVC_ENABLE_OPTIMIZE()
-
-#endif  // COMPILER_MSVC
+// A wrapper around `__has_builtin`, similar to HAS_CPP_ATTRIBUTE.
+#if defined(__has_builtin)
+#define HAS_BUILTIN(x) __has_builtin(x)
+#else
+#define HAS_BUILTIN(x) 0
+#endif
 
 // Annotate a variable indicating it's ok if the variable is not used.
 // (Typically used to silence a compiler warning when the assignment
@@ -88,12 +59,26 @@
 #define NOINLINE
 #endif
 
-#if COMPILER_GCC && defined(NDEBUG)
+#if defined(COMPILER_GCC) && defined(NDEBUG)
 #define ALWAYS_INLINE inline __attribute__((__always_inline__))
-#elif COMPILER_MSVC && defined(NDEBUG)
+#elif defined(COMPILER_MSVC) && defined(NDEBUG)
 #define ALWAYS_INLINE __forceinline
 #else
 #define ALWAYS_INLINE inline
+#endif
+
+// Annotate a function indicating it should never be tail called. Useful to make
+// sure callers of the annotated function are never omitted from call-stacks.
+// To provide the complementary behavior (prevent the annotated function from
+// being omitted) look at NOINLINE. Also note that this doesn't prevent code
+// folding of multiple identical caller functions into a single signature. To
+// prevent code folding, see NO_CODE_FOLDING() in base/debug/alias.h.
+// Use like:
+//   void NOT_TAIL_CALLED FooBar();
+#if defined(__clang__) && __has_attribute(not_tail_called)
+#define NOT_TAIL_CALLED __attribute__((not_tail_called))
+#else
+#define NOT_TAIL_CALLED
 #endif
 
 // Specify memory alignment for structs, classes, etc.
@@ -134,14 +119,29 @@
 #define WARN_UNUSED_RESULT
 #endif
 
+// In case the compiler supports it NO_UNIQUE_ADDRESS evaluates to the C++20
+// attribute [[no_unique_address]]. This allows annotating data members so that
+// they need not have an address distinct from all other non-static data members
+// of its class.
+//
+// References:
+// * https://en.cppreference.com/w/cpp/language/attributes/no_unique_address
+// * https://wg21.link/dcl.attr.nouniqueaddr
+#if HAS_CPP_ATTRIBUTE(no_unique_address)
+#define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#else
+#define NO_UNIQUE_ADDRESS
+#endif
+
 // Tell the compiler a function is using a printf-style format string.
 // |format_param| is the one-based index of the format string parameter;
 // |dots_param| is the one-based index of the "..." parameter.
 // For v*printf functions (which take a va_list), pass 0 for dots_param.
 // (This is undocumented but matches what the system C headers do.)
+// For member functions, the implicit this parameter counts as index 1.
 #if defined(COMPILER_GCC) || defined(__clang__)
 #define PRINTF_FORMAT(format_param, dots_param) \
-    __attribute__((format(printf, format_param, dots_param)))
+  __attribute__((format(printf, format_param, dots_param)))
 #else
 #define PRINTF_FORMAT(format_param, dots_param)
 #endif
@@ -170,14 +170,14 @@
 // Mark a memory region fully initialized.
 // Use this to annotate code that deliberately reads uninitialized data, for
 // example a GC scavenging root set pointers from the stack.
-#define MSAN_UNPOISON(p, size)  __msan_unpoison(p, size)
+#define MSAN_UNPOISON(p, size) __msan_unpoison(p, size)
 
 // Check a memory region for initializedness, as if it was being used here.
 // If any bits are uninitialized, crash with an MSan report.
 // Use this to sanitize data which MSan won't be able to track, e.g. before
 // passing data to another process via shared memory.
 #define MSAN_CHECK_MEM_IS_INITIALIZED(p, size) \
-    __msan_check_mem_is_initialized(p, size)
+  __msan_check_mem_is_initialized(p, size)
 #else  // MEMORY_SANITIZER
 #define MSAN_UNPOISON(p, size)
 #define MSAN_CHECK_MEM_IS_INITIALIZED(p, size)
@@ -190,6 +190,19 @@
 #else
 #define DISABLE_CFI_PERF
 #endif
+#endif
+
+// DISABLE_CFI_ICALL -- Disable Control Flow Integrity indirect call checks.
+#if !defined(DISABLE_CFI_ICALL)
+#if defined(OS_WIN)
+// Windows also needs __declspec(guard(nocf)).
+#define DISABLE_CFI_ICALL NO_SANITIZE("cfi-icall") __declspec(guard(nocf))
+#else
+#define DISABLE_CFI_ICALL NO_SANITIZE("cfi-icall")
+#endif
+#endif
+#if !defined(DISABLE_CFI_ICALL)
+#define DISABLE_CFI_ICALL
 #endif
 
 // Macro useful for writing cross-platform function pointers.
@@ -231,6 +244,106 @@
 #define FALLTHROUGH [[clang::fallthrough]]
 #else
 #define FALLTHROUGH
+#endif
+
+#if defined(COMPILER_GCC)
+#define PRETTY_FUNCTION __PRETTY_FUNCTION__
+#elif defined(COMPILER_MSVC)
+#define PRETTY_FUNCTION __FUNCSIG__
+#else
+// See https://en.cppreference.com/w/c/language/function_definition#func
+#define PRETTY_FUNCTION __func__
+#endif
+
+#if !defined(CPU_ARM_NEON)
+#if defined(__arm__)
+#if !defined(__ARMEB__) && !defined(__ARM_EABI__) && !defined(__EABI__) && \
+    !defined(__VFP_FP__) && !defined(_WIN32_WCE) && !defined(ANDROID)
+#error Chromium does not support middle endian architecture
+#endif
+#if defined(__ARM_NEON__)
+#define CPU_ARM_NEON 1
+#endif
+#endif  // defined(__arm__)
+#endif  // !defined(CPU_ARM_NEON)
+
+#if !defined(HAVE_MIPS_MSA_INTRINSICS)
+#if defined(__mips_msa) && defined(__mips_isa_rev) && (__mips_isa_rev >= 5)
+#define HAVE_MIPS_MSA_INTRINSICS 1
+#endif
+#endif
+
+#if defined(__clang__) && __has_attribute(uninitialized)
+// Attribute "uninitialized" disables -ftrivial-auto-var-init=pattern for
+// the specified variable.
+// Library-wide alternative is
+// 'configs -= [ "//build/config/compiler:default_init_stack_vars" ]' in .gn
+// file.
+//
+// See "init_stack_vars" in build/config/compiler/BUILD.gn and
+// http://crbug.com/977230
+// "init_stack_vars" is enabled for non-official builds and we hope to enable it
+// in official build in 2020 as well. The flag writes fixed pattern into
+// uninitialized parts of all local variables. In rare cases such initialization
+// is undesirable and attribute can be used:
+//   1. Degraded performance
+// In most cases compiler is able to remove additional stores. E.g. if memory is
+// never accessed or properly initialized later. Preserved stores mostly will
+// not affect program performance. However if compiler failed on some
+// performance critical code we can get a visible regression in a benchmark.
+//   2. memset, memcpy calls
+// Compiler may replaces some memory writes with memset or memcpy calls. This is
+// not -ftrivial-auto-var-init specific, but it can happen more likely with the
+// flag. It can be a problem if code is not linked with C run-time library.
+//
+// Note: The flag is security risk mitigation feature. So in future the
+// attribute uses should be avoided when possible. However to enable this
+// mitigation on the most of the code we need to be less strict now and minimize
+// number of exceptions later. So if in doubt feel free to use attribute, but
+// please document the problem for someone who is going to cleanup it later.
+// E.g. platform, bot, benchmark or test name in patch description or next to
+// the attribute.
+#define STACK_UNINITIALIZED __attribute__((uninitialized))
+#else
+#define STACK_UNINITIALIZED
+#endif
+
+// The ANALYZER_ASSUME_TRUE(bool arg) macro adds compiler-specific hints
+// to Clang which control what code paths are statically analyzed,
+// and is meant to be used in conjunction with assert & assert-like functions.
+// The expression is passed straight through if analysis isn't enabled.
+//
+// ANALYZER_SKIP_THIS_PATH() suppresses static analysis for the current
+// codepath and any other branching codepaths that might follow.
+#if defined(__clang_analyzer__)
+
+inline constexpr bool AnalyzerNoReturn() __attribute__((analyzer_noreturn)) {
+  return false;
+}
+
+inline constexpr bool AnalyzerAssumeTrue(bool arg) {
+  // AnalyzerNoReturn() is invoked and analysis is terminated if |arg| is
+  // false.
+  return arg || AnalyzerNoReturn();
+}
+
+#define ANALYZER_ASSUME_TRUE(arg) ::AnalyzerAssumeTrue(!!(arg))
+#define ANALYZER_SKIP_THIS_PATH() static_cast<void>(::AnalyzerNoReturn())
+#define ANALYZER_ALLOW_UNUSED(var) static_cast<void>(var);
+
+#else  // !defined(__clang_analyzer__)
+
+#define ANALYZER_ASSUME_TRUE(arg) (arg)
+#define ANALYZER_SKIP_THIS_PATH()
+#define ANALYZER_ALLOW_UNUSED(var) static_cast<void>(var);
+
+#endif  // defined(__clang_analyzer__)
+
+// Use nomerge attribute to disable optimization of merging multiple same calls.
+#if defined(__clang__) && __has_attribute(nomerge) && !defined(__ANDROID_EMULATOR__)
+#define NOMERGE [[clang::nomerge]]
+#else
+#define NOMERGE
 #endif
 
 #endif  // BASE_COMPILER_SPECIFIC_H_

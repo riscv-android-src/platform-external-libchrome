@@ -6,7 +6,12 @@
 
 #include <sys/mman.h>
 
+#include "base/bits.h"
+#include "base/logging.h"
+#include "base/memory/shared_memory_tracker.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/process/process_metrics.h"
 #include "third_party/ashmem/ashmem.h"
 
 namespace base {
@@ -19,10 +24,11 @@ namespace subtle {
 
 namespace {
 
-static int GetAshmemRegionProtectionMask(int fd) {
+int GetAshmemRegionProtectionMask(int fd) {
   int prot = ashmem_get_prot_region(fd);
   if (prot < 0) {
-    DPLOG(ERROR) << "ashmem_get_prot_region failed";
+    // TODO(crbug.com/838365): convert to DLOG when bug fixed.
+    PLOG(ERROR) << "ashmem_get_prot_region failed";
     return -1;
   }
   return prot;
@@ -110,18 +116,13 @@ bool PlatformSharedMemoryRegion::ConvertToUnsafe() {
   return true;
 }
 
-bool PlatformSharedMemoryRegion::MapAt(off_t offset,
-                                       size_t size,
-                                       void** memory,
-                                       size_t* mapped_size) const {
-  if (!IsValid())
-    return false;
-
-  size_t end_byte;
-  if (!CheckAdd(offset, size).AssignIfValid(&end_byte) || end_byte > size_) {
-    return false;
-  }
-
+bool PlatformSharedMemoryRegion::MapAtInternal(off_t offset,
+                                               size_t size,
+                                               void** memory,
+                                               size_t* mapped_size) const {
+  // IMPORTANT: Even if the mapping is readonly and the mapped data is not
+  // changing, the region must ALWAYS be mapped with MAP_SHARED, otherwise with
+  // ashmem the mapping is equivalent to a private anonymous mapping.
   bool write_allowed = mode_ != Mode::kReadOnly;
   *memory = mmap(nullptr, size, PROT_READ | (write_allowed ? PROT_WRITE : 0),
                  MAP_SHARED, handle_.get(), offset);
@@ -133,42 +134,44 @@ bool PlatformSharedMemoryRegion::MapAt(off_t offset,
   }
 
   *mapped_size = size;
-  DCHECK_EQ(0U,
-            reinterpret_cast<uintptr_t>(*memory) & (kMapMinimumAlignment - 1));
   return true;
 }
 
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
                                                               size_t size) {
-  if (size == 0)
+  if (size == 0) {
     return {};
+  }
 
-  if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
+  // Align size as required by ashmem_create_region() API documentation. This
+  // operation may overflow so check that the result doesn't decrease.
+  size_t rounded_size = bits::AlignUp(size, GetPageSize());
+  if (rounded_size < size ||
+      rounded_size > static_cast<size_t>(std::numeric_limits<int>::max())) {
     return {};
+  }
 
   CHECK_NE(mode, Mode::kReadOnly) << "Creating a region in read-only mode will "
                                      "lead to this region being non-modifiable";
 
   UnguessableToken guid = UnguessableToken::Create();
 
-  // trace_event is not supported in libchrome. To avoid includes of more
-  // trace_event code by base/memory/shared_memory_tracker.h, replace
-  // SharedMemoryTracker::GetDumpNameForTracing by the actual implementation.
-  ScopedFD fd(ashmem_create_region(
-      ("shared_memory/"+guid.ToString()).c_str(), size));
-  if (!fd.is_valid()) {
+  int fd = ashmem_create_region(
+      SharedMemoryTracker::GetDumpNameForTracing(guid).c_str(), rounded_size);
+  if (fd < 0) {
     DPLOG(ERROR) << "ashmem_create_region failed";
     return {};
   }
 
-  int err = ashmem_set_prot_region(fd.get(), PROT_READ | PROT_WRITE);
+  ScopedFD scoped_fd(fd);
+  int err = ashmem_set_prot_region(scoped_fd.get(), PROT_READ | PROT_WRITE);
   if (err < 0) {
     DPLOG(ERROR) << "ashmem_set_prot_region failed";
     return {};
   }
 
-  return PlatformSharedMemoryRegion(std::move(fd), mode, size, guid);
+  return PlatformSharedMemoryRegion(std::move(scoped_fd), mode, size, guid);
 }
 
 bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
@@ -183,9 +186,10 @@ bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
   bool expected_read_only = mode == Mode::kReadOnly;
 
   if (is_read_only != expected_read_only) {
-    DLOG(ERROR) << "Ashmem region has a wrong protection mask: it is"
-                << (is_read_only ? " " : " not ") << "read-only but it should"
-                << (expected_read_only ? " " : " not ") << "be";
+    // TODO(crbug.com/838365): convert to DLOG when bug fixed.
+    LOG(ERROR) << "Ashmem region has a wrong protection mask: it is"
+               << (is_read_only ? " " : " not ") << "read-only but it should"
+               << (expected_read_only ? " " : " not ") << "be";
     return false;
   }
 

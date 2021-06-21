@@ -4,16 +4,29 @@
 
 #include "base/memory/platform_shared_memory_region.h"
 
+#include "base/check.h"
 #include "base/memory/shared_memory_mapping.h"
 #include "base/process/process_metrics.h"
-#include "base/sys_info.h"
+#include "base/ranges/algorithm.h"
+#include "base/system/sys_info.h"
 #include "base/test/gtest_util.h"
 #include "base/test/test_shared_memory_util.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if defined(OS_MAC)
 #include <mach/mach_vm.h>
+#include <sys/mman.h>
+#elif defined(OS_POSIX) && !defined(OS_IOS)
+#include <sys/mman.h>
+#include "base/debug/proc_maps_linux.h"
+#elif defined(OS_WIN)
+#include <windows.h>
+#include "base/logging.h"
+#elif defined(OS_FUCHSIA)
+#include <lib/zx/object.h>
+#include <lib/zx/process.h>
+#include "base/fuchsia/fuchsia_logging.h"
 #endif
 
 namespace base {
@@ -57,6 +70,19 @@ TEST_F(PlatformSharedMemoryRegionTest, CreateTooLargeRegionIsInvalid) {
 
   PlatformSharedMemoryRegion region2 =
       PlatformSharedMemoryRegion::CreateUnsafe(too_large_region_size);
+  EXPECT_FALSE(region2.IsValid());
+}
+
+// Tests that creating a region of maximum possible value returns an invalid
+// region.
+TEST_F(PlatformSharedMemoryRegionTest, CreateMaxSizeRegionIsInvalid) {
+  size_t max_region_size = std::numeric_limits<size_t>::max();
+  PlatformSharedMemoryRegion region =
+      PlatformSharedMemoryRegion::CreateWritable(max_region_size);
+  EXPECT_FALSE(region.IsValid());
+
+  PlatformSharedMemoryRegion region2 =
+      PlatformSharedMemoryRegion::CreateUnsafe(max_region_size);
   EXPECT_FALSE(region2.IsValid());
 }
 
@@ -150,6 +176,15 @@ TEST_F(PlatformSharedMemoryRegionTest, TakeTooLargeRegionIsInvalid) {
   EXPECT_FALSE(region2.IsValid());
 }
 
+// Tests that mapping zero bytes fails.
+TEST_F(PlatformSharedMemoryRegionTest, MapAtZeroBytesTest) {
+  PlatformSharedMemoryRegion region =
+      PlatformSharedMemoryRegion::CreateWritable(kRegionSize);
+  ASSERT_TRUE(region.IsValid());
+  WritableSharedMemoryMapping mapping = MapAtForTesting(&region, 0, 0);
+  EXPECT_FALSE(mapping.IsValid());
+}
+
 // Tests that mapping bytes out of the region limits fails.
 TEST_F(PlatformSharedMemoryRegionTest, MapAtOutOfTheRegionLimitsTest) {
   PlatformSharedMemoryRegion region =
@@ -175,7 +210,7 @@ TEST_F(PlatformSharedMemoryRegionTest, MapAtWithOverflowTest) {
   EXPECT_FALSE(mapping.IsValid());
 }
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_MAC)
 // Tests that the second handle is closed after a conversion to read-only on
 // POSIX.
 TEST_F(PlatformSharedMemoryRegionTest,
@@ -200,27 +235,78 @@ TEST_F(PlatformSharedMemoryRegionTest, ConvertToUnsafeInvalidatesSecondHandle) {
 }
 #endif
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-// Tests that protection bits are set correctly for read-only region on MacOS.
-TEST_F(PlatformSharedMemoryRegionTest, MapCurrentAndMaxProtectionSetCorrectly) {
+void CheckReadOnlyMapProtection(void* addr) {
+#if defined(OS_MAC)
+  vm_region_basic_info_64 basic_info;
+  mach_vm_size_t dummy_size = 0;
+  void* temp_addr = addr;
+  MachVMRegionResult result = GetBasicInfo(
+      mach_task_self(), &dummy_size,
+      reinterpret_cast<mach_vm_address_t*>(&temp_addr), &basic_info);
+  ASSERT_EQ(result, MachVMRegionResult::Success);
+  EXPECT_EQ(basic_info.protection & VM_PROT_ALL, VM_PROT_READ);
+  EXPECT_EQ(basic_info.max_protection & VM_PROT_ALL, VM_PROT_READ);
+#elif defined(OS_POSIX) && !defined(OS_IOS)
+  std::string proc_maps;
+  ASSERT_TRUE(base::debug::ReadProcMaps(&proc_maps));
+  std::vector<base::debug::MappedMemoryRegion> regions;
+  ASSERT_TRUE(base::debug::ParseProcMaps(proc_maps, &regions));
+  auto it = ranges::find_if(
+      regions, [addr](const base::debug::MappedMemoryRegion& region) {
+        return region.start == reinterpret_cast<uintptr_t>(addr);
+      });
+  ASSERT_TRUE(it != regions.end());
+  // PROT_READ may imply PROT_EXEC on some architectures, so just check that
+  // permissions don't contain PROT_WRITE bit.
+  EXPECT_FALSE(it->permissions & base::debug::MappedMemoryRegion::WRITE);
+#elif defined(OS_WIN)
+  MEMORY_BASIC_INFORMATION memory_info;
+  size_t result = VirtualQueryEx(GetCurrentProcess(), addr, &memory_info,
+                                 sizeof(memory_info));
+
+  ASSERT_GT(result, 0ULL) << "Failed executing VirtualQueryEx "
+                          << logging::SystemErrorCodeToString(
+                                 logging::GetLastSystemErrorCode());
+  EXPECT_EQ(memory_info.AllocationProtect, static_cast<DWORD>(PAGE_READONLY));
+  EXPECT_EQ(memory_info.Protect, static_cast<DWORD>(PAGE_READONLY));
+#elif defined(OS_FUCHSIA)
+// TODO(alexilin): We cannot call zx_object_get_info ZX_INFO_PROCESS_MAPS in
+// this process. Consider to create an auxiliary process that will read the
+// test process maps.
+#endif
+}
+
+bool TryToRestoreWritablePermissions(void* addr, size_t len) {
+#if defined(OS_POSIX) && !defined(OS_IOS)
+  int result = mprotect(addr, len, PROT_READ | PROT_WRITE);
+  return result != -1;
+#elif defined(OS_WIN)
+  DWORD old_protection;
+  return VirtualProtect(addr, len, PAGE_READWRITE, &old_protection);
+#elif defined(OS_FUCHSIA)
+  zx_status_t status =
+      zx::vmar::root_self()->protect2(ZX_VM_PERM_READ | ZX_VM_PERM_WRITE,
+                                      reinterpret_cast<uintptr_t>(addr), len);
+  return status == ZX_OK;
+#else
+  return false;
+#endif
+}
+
+// Tests that protection bits are set correctly for read-only region.
+TEST_F(PlatformSharedMemoryRegionTest, MappingProtectionSetCorrectly) {
   PlatformSharedMemoryRegion region =
       PlatformSharedMemoryRegion::CreateWritable(kRegionSize);
   ASSERT_TRUE(region.IsValid());
   ASSERT_TRUE(region.ConvertToReadOnly());
   WritableSharedMemoryMapping ro_mapping = MapForTesting(&region);
   ASSERT_TRUE(ro_mapping.IsValid());
+  CheckReadOnlyMapProtection(ro_mapping.memory());
 
-  vm_region_basic_info_64 basic_info;
-  mach_vm_size_t dummy_size = 0;
-  void* temp_addr = ro_mapping.memory();
-  MachVMRegionResult result = GetBasicInfo(
-      mach_task_self(), &dummy_size,
-      reinterpret_cast<mach_vm_address_t*>(&temp_addr), &basic_info);
-  EXPECT_EQ(result, MachVMRegionResult::Success);
-  EXPECT_EQ(basic_info.protection & VM_PROT_ALL, VM_PROT_READ);
-  EXPECT_EQ(basic_info.max_protection & VM_PROT_ALL, VM_PROT_READ);
+  EXPECT_FALSE(TryToRestoreWritablePermissions(ro_mapping.memory(),
+                                               ro_mapping.mapped_size()));
+  CheckReadOnlyMapProtection(ro_mapping.memory());
 }
-#endif
 
 // Tests that platform handle permissions are checked correctly.
 TEST_F(PlatformSharedMemoryRegionTest,

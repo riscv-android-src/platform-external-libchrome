@@ -29,8 +29,11 @@
 // you want to refer to is not in scope, you may use a member pointer
 // (e.g. &MyClass::mutex_) to refer to a mutex in some (unknown) object.
 
-#ifndef THREAD_ANNOTATIONS_H_
-#define THREAD_ANNOTATIONS_H_
+#ifndef BASE_THREAD_ANNOTATIONS_H_
+#define BASE_THREAD_ANNOTATIONS_H_
+
+#include "base/check_op.h"
+#include "build/build_config.h"
 
 #if defined(__clang__)
 #define THREAD_ANNOTATION_ATTRIBUTE__(x) __attribute__((x))
@@ -235,4 +238,21 @@ inline T& ts_unchecked_read(T& v) NO_THREAD_SAFETY_ANALYSIS {
 
 }  // namespace thread_safety_analysis
 
-#endif  // _BASE_THREAD_ANNOTATIONS_H_
+// The above is imported as-is from abseil-cpp. The following Chromium-specific
+// synonyms are added for Chromium concepts (SequenceChecker/ThreadChecker).
+#if DCHECK_IS_ON()
+
+// Equivalent to GUARDED_BY for SequenceChecker/ThreadChecker. Currently,
+#define GUARDED_BY_CONTEXT(name) GUARDED_BY(name)
+
+// Equivalent to EXCLUSIVE_LOCKS_REQUIRED for SequenceChecker/ThreadChecker.
+#define VALID_CONTEXT_REQUIRED(name) EXCLUSIVE_LOCKS_REQUIRED(name)
+
+#else  // DCHECK_IS_ON()
+
+#define GUARDED_BY_CONTEXT(name)
+#define VALID_CONTEXT_REQUIRED(name)
+
+#endif  // DCHECK_IS_ON()
+
+#endif  // BASE_THREAD_ANNOTATIONS_H_

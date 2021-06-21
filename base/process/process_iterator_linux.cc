@@ -8,6 +8,7 @@
 
 #include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/notreached.h"
 #include "base/process/internal_linux.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -33,7 +34,7 @@ std::string GetProcStatsFieldAsString(
     return proc_stats[field_num];
 
   NOTREACHED();
-  return nullptr;
+  return std::string();
 }
 
 // Reads /proc/<pid>/cmdline and populates |proc_cmd_line_args| with the command

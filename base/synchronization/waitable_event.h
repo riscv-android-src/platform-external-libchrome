@@ -8,12 +8,13 @@
 #include <stddef.h>
 
 #include "base/base_export.h"
+#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_handle.h"
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
 #include <mach/mach.h>
 
 #include <list>
@@ -34,7 +35,6 @@
 namespace base {
 
 class TimeDelta;
-class TimeTicks;
 
 // A WaitableEvent can be a useful thread synchronization tool when you want to
 // allow one thread to wait for another thread to finish some work. For
@@ -95,23 +95,27 @@ class BASE_EXPORT WaitableEvent {
   //   SendToOtherThread(e);
   //   e->Wait();
   //   delete e;
-  void Wait();
+  void NOT_TAIL_CALLED Wait();
 
-  // Wait up until wait_delta has passed for the event to be signaled.  Returns
-  // true if the event was signaled.
+  // Wait up until wait_delta has passed for the event to be signaled
+  // (real-time; ignores time overrides).  Returns true if the event was
+  // signaled. Handles spurious wakeups and guarantees that |wait_delta| will
+  // have elapsed if this returns false.
   //
   // TimedWait can synchronise its own destruction like |Wait|.
-  bool TimedWait(const TimeDelta& wait_delta);
-
-  // Wait up until end_time deadline has passed for the event to be signaled.
-  // Return true if the event was signaled.
-  //
-  // TimedWaitUntil can synchronise its own destruction like |Wait|.
-  bool TimedWaitUntil(const TimeTicks& end_time);
+  bool NOT_TAIL_CALLED TimedWait(const TimeDelta& wait_delta);
 
 #if defined(OS_WIN)
   HANDLE handle() const { return handle_.Get(); }
 #endif
+
+  // Declares that this WaitableEvent will only ever be used by a thread that is
+  // idle at the bottom of its stack and waiting for work (in particular, it is
+  // not synchronously waiting on this event before resuming ongoing work). This
+  // is useful to avoid telling base-internals that this thread is "blocked"
+  // when it's merely idle and ready to do work. As such, this is only expected
+  // to be used by thread and thread pool impls.
+  void declare_only_used_while_idle() { waiting_is_blocking_ = false; }
 
   // Wait, synchronously, on multiple events.
   //   waitables: an array of WaitableEvent pointers
@@ -125,7 +129,8 @@ class BASE_EXPORT WaitableEvent {
   //
   // If more than one WaitableEvent is signaled to unblock WaitMany, the lowest
   // index among them is returned.
-  static size_t WaitMany(WaitableEvent** waitables, size_t count);
+  static size_t NOT_TAIL_CALLED WaitMany(WaitableEvent** waitables,
+                                         size_t count);
 
   // For asynchronous waiting, see WaitableEventWatcher
 
@@ -164,7 +169,7 @@ class BASE_EXPORT WaitableEvent {
 
 #if defined(OS_WIN)
   win::ScopedHandle handle_;
-#elif defined(OS_MACOSX)
+#elif defined(OS_APPLE)
   // Prior to macOS 10.12, a TYPE_MACH_RECV dispatch source may not be invoked
   // immediately. If a WaitableEventWatcher is used on a manual-reset event,
   // and another thread that is Wait()ing on the event calls Reset()
@@ -191,7 +196,7 @@ class BASE_EXPORT WaitableEvent {
    public:
     ReceiveRight(mach_port_t name, bool create_slow_watch_list);
 
-    mach_port_t Name() const { return right_.get(); };
+    mach_port_t Name() const { return right_.get(); }
 
     // This structure is used iff UseSlowWatchList() is true. See the comment
     // in Signal() for details.
@@ -275,6 +280,10 @@ class BASE_EXPORT WaitableEvent {
 
   scoped_refptr<WaitableEventKernel> kernel_;
 #endif
+
+  // Whether a thread invoking Wait() on this WaitableEvent should be considered
+  // blocked as opposed to idle (and potentially replaced if part of a pool).
+  bool waiting_is_blocking_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(WaitableEvent);
 };

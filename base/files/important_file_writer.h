@@ -5,12 +5,12 @@
 #ifndef BASE_FILES_IMPORTANT_FILE_WRITER_H_
 #define BASE_FILES_IMPORTANT_FILE_WRITER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/base_export.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_piece.h"
@@ -64,13 +64,16 @@ class BASE_EXPORT ImportantFileWriter {
   // All non-const methods, ctor and dtor must be called on the same thread.
   ImportantFileWriter(const FilePath& path,
                       scoped_refptr<SequencedTaskRunner> task_runner,
-                      const char* histogram_suffix = nullptr);
+                      StringPiece histogram_suffix = StringPiece());
 
   // Same as above, but with a custom commit interval.
   ImportantFileWriter(const FilePath& path,
                       scoped_refptr<SequencedTaskRunner> task_runner,
                       TimeDelta interval,
-                      const char* histogram_suffix = nullptr);
+                      StringPiece histogram_suffix = StringPiece());
+
+  ImportantFileWriter(const ImportantFileWriter&) = delete;
+  ImportantFileWriter& operator=(const ImportantFileWriter&) = delete;
 
   // You have to ensure that there are no pending writes at the moment
   // of destruction.
@@ -106,28 +109,53 @@ class BASE_EXPORT ImportantFileWriter {
   // If called more than once before a write is scheduled on |task_runner|, the
   // latest callbacks clobber the others.
   void RegisterOnNextWriteCallbacks(
-      const Closure& before_next_write_callback,
-      const Callback<void(bool success)>& after_next_write_callback);
+      OnceClosure before_next_write_callback,
+      OnceCallback<void(bool success)> after_next_write_callback);
 
   TimeDelta commit_interval() const {
     return commit_interval_;
   }
 
   // Overrides the timer to use for scheduling writes with |timer_override|.
-  void SetTimerForTesting(Timer* timer_override);
+  void SetTimerForTesting(OneShotTimer* timer_override);
+
+#if defined(UNIT_TEST)
+  size_t previous_data_size() const { return previous_data_size_; }
+#endif
+  void set_previous_data_size(size_t previous_data_size) {
+    previous_data_size_ = previous_data_size;
+  }
 
  private:
-  const Timer& timer() const {
-    return timer_override_ ? const_cast<const Timer&>(*timer_override_)
-                           : timer_;
+  const OneShotTimer& timer() const {
+    return timer_override_ ? *timer_override_ : timer_;
   }
-  Timer& timer() { return timer_override_ ? *timer_override_ : timer_; }
+  OneShotTimer& timer() { return timer_override_ ? *timer_override_ : timer_; }
+
+  // Helper function to call WriteFileAtomically() with a
+  // std::unique_ptr<std::string>.
+  static void WriteScopedStringToFileAtomically(
+      const FilePath& path,
+      std::unique_ptr<std::string> data,
+      OnceClosure before_write_callback,
+      OnceCallback<void(bool success)> after_write_callback,
+      const std::string& histogram_suffix);
+
+  // Writes |data| to |path|, recording histograms with an optional
+  // |histogram_suffix|. |from_instance| indicates whether the call originates
+  // from an instance of ImportantFileWriter or a direct call to
+  // WriteFileAtomically. When false, the directory containing |path| is added
+  // to the set cleaned by the ImportantFileWriterCleaner (Windows only).
+  static bool WriteFileAtomicallyImpl(const FilePath& path,
+                                      StringPiece data,
+                                      StringPiece histogram_suffix,
+                                      bool from_instance);
 
   void ClearPendingWrite();
 
   // Invoked synchronously on the next write event.
-  Closure before_next_write_callback_;
-  Callback<void(bool success)> after_next_write_callback_;
+  OnceClosure before_next_write_callback_;
+  OnceCallback<void(bool success)> after_next_write_callback_;
 
   // Path being written to.
   const FilePath path_;
@@ -139,7 +167,7 @@ class BASE_EXPORT ImportantFileWriter {
   OneShotTimer timer_;
 
   // An override for |timer_| used for testing.
-  Timer* timer_override_ = nullptr;
+  OneShotTimer* timer_override_ = nullptr;
 
   // Serializer which will provide the data to be saved.
   DataSerializer* serializer_;
@@ -150,11 +178,14 @@ class BASE_EXPORT ImportantFileWriter {
   // Custom histogram suffix.
   const std::string histogram_suffix_;
 
+  // Memorizes the amount of data written on the previous write. This helps
+  // preallocating memory for the data serialization. It is only used for
+  // scheduled writes.
+  size_t previous_data_size_ = 0;
+
   SEQUENCE_CHECKER(sequence_checker_);
 
-  WeakPtrFactory<ImportantFileWriter> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ImportantFileWriter);
+  WeakPtrFactory<ImportantFileWriter> weak_factory_{this};
 };
 
 }  // namespace base

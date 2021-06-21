@@ -11,11 +11,12 @@
 #include "base/callback.h"
 #include "base/containers/queue.h"
 #include "base/location.h"
+#include "base/optional.h"
 #include "base/time/time.h"
 
 namespace base {
 
-enum class Nestable {
+enum class Nestable : uint8_t {
   kNonNestable,
   kNestable,
 };
@@ -23,6 +24,7 @@ enum class Nestable {
 // Contains data about a pending task. Stored in TaskQueue and DelayedTaskQueue
 // for use by classes that queue and execute tasks.
 struct BASE_EXPORT PendingTask {
+  PendingTask();
   PendingTask(const Location& posted_from,
               OnceClosure task,
               TimeTicks delayed_run_time = TimeTicks(),
@@ -41,15 +43,37 @@ struct BASE_EXPORT PendingTask {
   // The site this PendingTask was posted from.
   Location posted_from;
 
-  // The time when the task should be run.
+  // The time when the task should be run. This is null for an immediate task.
   base::TimeTicks delayed_run_time;
 
-  // Chain of up-to-four symbols of the parent tasks which led to this one being
-  // posted.
-  std::array<const void*, 4> task_backtrace = {};
+  // The time at which the task was queued. For SequenceManager tasks and
+  // ThreadPool non-delayed tasks, this happens at post time. For ThreadPool
+  // delayed tasks, this happens some time after the task's delay has expired.
+  // For deferred non-nestable tasks, this is reset when the nested loop exits
+  // and the deferred tasks are pushed back at the front of the queue. This is
+  // not set for SequenceManager tasks if SetAddQueueTimeToTasks(true) wasn't
+  // called. This defaults to a null TimeTicks if the task hasn't been inserted
+  // in a sequence yet.
+  TimeTicks queue_time;
+
+  // Chain of symbols of the parent tasks which led to this one being posted.
+  static constexpr size_t kTaskBacktraceLength = 4;
+  std::array<const void*, kTaskBacktraceLength> task_backtrace = {};
+
+  // The context of the IPC message that was being handled when this task was
+  // posted. This is a hash of the IPC message name that is set within the scope
+  // of an IPC handler and when symbolized uniquely identifies the message being
+  // processed. This property is not propagated from one PendingTask to the
+  // next. For example, if pending task A was posted while handling an IPC,
+  // and pending task B was posted from within pending task A, then pending task
+  // B will not inherit the |ipc_hash| of pending task A.
+  uint32_t ipc_hash = 0;
+  const char* ipc_interface_name = nullptr;
 
   // Secondary sort key for run time.
   int sequence_num = 0;
+
+  bool task_backtrace_overflow = false;
 
   // OK to dispatch from a nested loop.
   Nestable nestable;

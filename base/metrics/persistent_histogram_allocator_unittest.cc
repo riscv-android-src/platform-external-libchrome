@@ -7,7 +7,6 @@
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/bucket_ranges.h"
 #include "base/metrics/histogram_macros.h"
@@ -274,7 +273,7 @@ TEST_F(PersistentHistogramAllocatorTest, StatisticsRecorderMerge) {
     HistogramBase* found =
         StatisticsRecorder::FindHistogram(recovered->histogram_name());
     EXPECT_NE(recovered.get(), found);
-  };
+  }
   EXPECT_EQ(starting_sr_count + 2, StatisticsRecorder::GetHistogramCount());
 
   // Check the merged histograms for accuracy.
@@ -313,7 +312,7 @@ TEST_F(PersistentHistogramAllocatorTest, StatisticsRecorderMerge) {
     if (!recovered)
       break;
     recovery2.MergeHistogramDeltaToStatisticsRecorder(recovered.get());
-  };
+  }
   EXPECT_EQ(starting_sr_count + 2, StatisticsRecorder::GetHistogramCount());
 
   // And verify.

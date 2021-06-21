@@ -5,9 +5,12 @@
 #include <stddef.h>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/process/process.h"
+#include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/threading_features.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -15,6 +18,16 @@
 #include "base/threading/platform_thread_internal_posix.h"
 #elif defined(OS_WIN)
 #include <windows.h>
+#include "base/threading/platform_thread_win.h"
+#endif
+
+#if defined(OS_APPLE)
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
+#include "base/mac/mac_util.h"
+#include "base/metrics/field_trial_params.h"
+#include "base/time/time.h"
 #endif
 
 namespace base {
@@ -52,16 +65,16 @@ TEST(PlatformThreadTest, TrivialJoin) {
 
 TEST(PlatformThreadTest, TrivialJoinTimesTen) {
   TrivialThread thread[10];
-  PlatformThreadHandle handle[arraysize(thread)];
+  PlatformThreadHandle handle[base::size(thread)];
 
-  for (size_t n = 0; n < arraysize(thread); n++)
-    ASSERT_FALSE(thread[n].run_event().IsSignaled());
-  for (size_t n = 0; n < arraysize(thread); n++)
+  for (auto& n : thread)
+    ASSERT_FALSE(n.run_event().IsSignaled());
+  for (size_t n = 0; n < base::size(thread); n++)
     ASSERT_TRUE(PlatformThread::Create(0, &thread[n], &handle[n]));
-  for (size_t n = 0; n < arraysize(thread); n++)
-    PlatformThread::Join(handle[n]);
-  for (size_t n = 0; n < arraysize(thread); n++)
-    ASSERT_TRUE(thread[n].run_event().IsSignaled());
+  for (auto n : handle)
+    PlatformThread::Join(n);
+  for (auto& n : thread)
+    ASSERT_TRUE(n.run_event().IsSignaled());
 }
 
 // The following detach tests are by nature racy. The run_event approximates the
@@ -79,16 +92,16 @@ TEST(PlatformThreadTest, TrivialDetach) {
 
 TEST(PlatformThreadTest, TrivialDetachTimesTen) {
   TrivialThread thread[10];
-  PlatformThreadHandle handle[arraysize(thread)];
+  PlatformThreadHandle handle[base::size(thread)];
 
-  for (size_t n = 0; n < arraysize(thread); n++)
-    ASSERT_FALSE(thread[n].run_event().IsSignaled());
-  for (size_t n = 0; n < arraysize(thread); n++) {
+  for (auto& n : thread)
+    ASSERT_FALSE(n.run_event().IsSignaled());
+  for (size_t n = 0; n < base::size(thread); n++) {
     ASSERT_TRUE(PlatformThread::Create(0, &thread[n], &handle[n]));
     PlatformThread::Detach(handle[n]);
   }
-  for (size_t n = 0; n < arraysize(thread); n++)
-    thread[n].run_event().Wait();
+  for (auto& n : thread)
+    n.run_event().Wait();
 }
 
 // Tests of basic thread functions ---------------------------------------------
@@ -185,17 +198,17 @@ TEST(PlatformThreadTest, FunctionTimesTen) {
   PlatformThreadId main_thread_id = PlatformThread::CurrentId();
 
   FunctionTestThread thread[10];
-  PlatformThreadHandle handle[arraysize(thread)];
+  PlatformThreadHandle handle[base::size(thread)];
 
-  for (size_t n = 0; n < arraysize(thread); n++)
-    ASSERT_FALSE(thread[n].IsRunning());
+  for (const auto& n : thread)
+    ASSERT_FALSE(n.IsRunning());
 
-  for (size_t n = 0; n < arraysize(thread); n++)
+  for (size_t n = 0; n < base::size(thread); n++)
     ASSERT_TRUE(PlatformThread::Create(0, &thread[n], &handle[n]));
-  for (size_t n = 0; n < arraysize(thread); n++)
-    thread[n].WaitForTerminationReady();
+  for (auto& n : thread)
+    n.WaitForTerminationReady();
 
-  for (size_t n = 0; n < arraysize(thread); n++) {
+  for (size_t n = 0; n < base::size(thread); n++) {
     ASSERT_TRUE(thread[n].IsRunning());
     EXPECT_NE(thread[n].thread_id(), main_thread_id);
 
@@ -205,12 +218,12 @@ TEST(PlatformThreadTest, FunctionTimesTen) {
     }
   }
 
-  for (size_t n = 0; n < arraysize(thread); n++)
-    thread[n].MarkForTermination();
-  for (size_t n = 0; n < arraysize(thread); n++)
-    PlatformThread::Join(handle[n]);
-  for (size_t n = 0; n < arraysize(thread); n++)
-    ASSERT_FALSE(thread[n].IsRunning());
+  for (auto& n : thread)
+    n.MarkForTermination();
+  for (auto n : handle)
+    PlatformThread::Join(n);
+  for (const auto& n : thread)
+    ASSERT_FALSE(n.IsRunning());
 
   // Make sure that the thread ID is the same across calls.
   EXPECT_EQ(main_thread_id, PlatformThread::CurrentId());
@@ -218,92 +231,114 @@ TEST(PlatformThreadTest, FunctionTimesTen) {
 
 namespace {
 
-const ThreadPriority kThreadPriorityTestValues[] = {
-// The order should be higher to lower to cover as much cases as possible on
-// Linux trybots running without CAP_SYS_NICE permission.
-#if !defined(OS_ANDROID)
-    // PlatformThread::GetCurrentThreadPriority() on Android does not support
-    // REALTIME_AUDIO case. See http://crbug.com/505474.
-    ThreadPriority::REALTIME_AUDIO,
-#endif
-    ThreadPriority::DISPLAY,
-    // This redundant BACKGROUND priority is to test backgrounding from other
-    // priorities, and unbackgrounding.
-    ThreadPriority::BACKGROUND,
-    ThreadPriority::NORMAL,
-    ThreadPriority::BACKGROUND};
-
 class ThreadPriorityTestThread : public FunctionTestThread {
  public:
-  explicit ThreadPriorityTestThread(ThreadPriority priority)
-      : priority_(priority) {}
+  explicit ThreadPriorityTestThread(ThreadPriority from, ThreadPriority to)
+      : from_(from), to_(to) {}
   ~ThreadPriorityTestThread() override = default;
 
  private:
   void RunTest() override {
-    // Confirm that the current thread's priority is as expected.
-    EXPECT_EQ(ThreadPriority::NORMAL,
-              PlatformThread::GetCurrentThreadPriority());
+    EXPECT_EQ(PlatformThread::GetCurrentThreadPriority(),
+              ThreadPriority::NORMAL);
+    PlatformThread::SetCurrentThreadPriority(from_);
+    EXPECT_EQ(PlatformThread::GetCurrentThreadPriority(), from_);
+    PlatformThread::SetCurrentThreadPriority(to_);
 
-    // Alter and verify the current thread's priority.
-    PlatformThread::SetCurrentThreadPriority(priority_);
-    EXPECT_EQ(priority_, PlatformThread::GetCurrentThreadPriority());
+    if (static_cast<int>(to_) <= static_cast<int>(from_) ||
+        PlatformThread::CanIncreaseThreadPriority(to_)) {
+      EXPECT_EQ(PlatformThread::GetCurrentThreadPriority(), to_);
+    } else {
+      EXPECT_NE(PlatformThread::GetCurrentThreadPriority(), to_);
+    }
   }
 
-  const ThreadPriority priority_;
+  const ThreadPriority from_;
+  const ThreadPriority to_;
 
   DISALLOW_COPY_AND_ASSIGN(ThreadPriorityTestThread);
 };
 
+void TestSetCurrentThreadPriority() {
+  constexpr ThreadPriority kAllThreadPriorities[] = {
+      ThreadPriority::REALTIME_AUDIO, ThreadPriority::DISPLAY,
+      ThreadPriority::NORMAL, ThreadPriority::BACKGROUND};
+
+  for (auto from : kAllThreadPriorities) {
+    if (static_cast<int>(from) <= static_cast<int>(ThreadPriority::NORMAL) ||
+        PlatformThread::CanIncreaseThreadPriority(from)) {
+      for (auto to : kAllThreadPriorities) {
+        ThreadPriorityTestThread thread(from, to);
+        PlatformThreadHandle handle;
+
+        ASSERT_FALSE(thread.IsRunning());
+        ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
+        thread.WaitForTerminationReady();
+        ASSERT_TRUE(thread.IsRunning());
+
+        thread.MarkForTermination();
+        PlatformThread::Join(handle);
+        ASSERT_FALSE(thread.IsRunning());
+      }
+    }
+  }
+}
+
 }  // namespace
 
-// Test changing a created thread's priority (which has different semantics on
-// some platforms).
+// Test changing a created thread's priority.
 #if defined(OS_FUCHSIA)
 // TODO(crbug.com/851759): Thread priorities are not implemented in Fuchsia.
-#define MAYBE_ThreadPriorityCurrentThread DISABLED_ThreadPriorityCurrentThread
+#define MAYBE_SetCurrentThreadPriority DISABLED_SetCurrentThreadPriority
 #else
-#define MAYBE_ThreadPriorityCurrentThread ThreadPriorityCurrentThread
+#define MAYBE_SetCurrentThreadPriority SetCurrentThreadPriority
 #endif
-TEST(PlatformThreadTest, MAYBE_ThreadPriorityCurrentThread) {
-  const bool increase_priority_allowed =
-      PlatformThread::CanIncreaseCurrentThreadPriority();
+TEST(PlatformThreadTest, MAYBE_SetCurrentThreadPriority) {
+  TestSetCurrentThreadPriority();
+}
 
-// Bump the priority in order to verify that new threads are started with normal
-// priority. Skip this on Mac since this platform doesn't allow changing the
-// priority of the main thread. Also skip this on platforms that don't allow
-// increasing the priority of a thread.
-#if !defined(OS_MACOSX)
-  if (increase_priority_allowed)
-    PlatformThread::SetCurrentThreadPriority(ThreadPriority::DISPLAY);
+#if defined(OS_WIN)
+// Test changing a created thread's priority in an IDLE_PRIORITY_CLASS process
+// (regression test for https://crbug.com/901483).
+TEST(PlatformThreadTest,
+     SetCurrentThreadPriorityWithThreadModeBackgroundIdleProcess) {
+  ::SetPriorityClass(Process::Current().Handle(), IDLE_PRIORITY_CLASS);
+  TestSetCurrentThreadPriority();
+  ::SetPriorityClass(Process::Current().Handle(), NORMAL_PRIORITY_CLASS);
+}
+#endif  // defined(OS_WIN)
+
+// Ideally PlatformThread::CanIncreaseThreadPriority() would be true on all
+// platforms for all priorities. This not being the case. This test documents
+// and hardcodes what we know. Please inform scheduler-dev@chromium.org if this
+// proprerty changes for a given platform.
+TEST(PlatformThreadTest, CanIncreaseThreadPriority) {
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  // On Ubuntu, RLIMIT_NICE and RLIMIT_RTPRIO are 0 by default, so we won't be
+  // able to increase priority to any level.
+  constexpr bool kCanIncreasePriority = false;
+#elif defined(OS_FUCHSIA)
+  // Fuchsia doesn't support thread priorities.
+  constexpr bool kCanIncreasePriority = false;
+#else
+  constexpr bool kCanIncreasePriority = true;
 #endif
 
-  // Toggle each supported priority on the thread and confirm it affects it.
-  for (size_t i = 0; i < arraysize(kThreadPriorityTestValues); ++i) {
-    if (!increase_priority_allowed &&
-        kThreadPriorityTestValues[i] >
-            PlatformThread::GetCurrentThreadPriority()) {
-      continue;
-    }
-
-    ThreadPriorityTestThread thread(kThreadPriorityTestValues[i]);
-    PlatformThreadHandle handle;
-
-    ASSERT_FALSE(thread.IsRunning());
-    ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
-    thread.WaitForTerminationReady();
-    ASSERT_TRUE(thread.IsRunning());
-
-    thread.MarkForTermination();
-    PlatformThread::Join(handle);
-    ASSERT_FALSE(thread.IsRunning());
-  }
+  EXPECT_EQ(
+      PlatformThread::CanIncreaseThreadPriority(ThreadPriority::BACKGROUND),
+      kCanIncreasePriority);
+  EXPECT_EQ(PlatformThread::CanIncreaseThreadPriority(ThreadPriority::NORMAL),
+            kCanIncreasePriority);
+  EXPECT_EQ(PlatformThread::CanIncreaseThreadPriority(ThreadPriority::DISPLAY),
+            kCanIncreasePriority);
+  EXPECT_EQ(
+      PlatformThread::CanIncreaseThreadPriority(ThreadPriority::REALTIME_AUDIO),
+      kCanIncreasePriority);
 }
 
 // This tests internal PlatformThread APIs used under some POSIX platforms,
 // with the exception of Mac OS X, iOS and Fuchsia.
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS) && \
-    !defined(OS_FUCHSIA)
+#if defined(OS_POSIX) && !defined(OS_APPLE) && !defined(OS_FUCHSIA)
 TEST(PlatformThreadTest, GetNiceValueToThreadPriority) {
   using internal::NiceValueToThreadPriority;
   using internal::kThreadPriorityToNiceValueMap;
@@ -358,7 +393,7 @@ TEST(PlatformThreadTest, GetNiceValueToThreadPriority) {
   EXPECT_EQ(ThreadPriority::REALTIME_AUDIO,
             NiceValueToThreadPriority(kLowestNiceValue));
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_IOS) &&
+#endif  // defined(OS_POSIX) && !defined(OS_APPLE) &&
         // !defined(OS_FUCHSIA)
 
 TEST(PlatformThreadTest, SetHugeThreadName) {
@@ -369,5 +404,169 @@ TEST(PlatformThreadTest, SetHugeThreadName) {
   // don't [D]CHECK().
   PlatformThread::SetName(long_name);
 }
+
+TEST(PlatformThreadTest, GetDefaultThreadStackSize) {
+  size_t stack_size = PlatformThread::GetDefaultThreadStackSize();
+#if defined(OS_WIN) || defined(OS_IOS) || defined(OS_FUCHSIA) || \
+    ((defined(OS_LINUX) || defined(OS_CHROMEOS)) &&              \
+     !defined(THREAD_SANITIZER)) ||                              \
+    (defined(OS_ANDROID) && !defined(ADDRESS_SANITIZER))
+  EXPECT_EQ(0u, stack_size);
+#else
+  EXPECT_GT(stack_size, 0u);
+  EXPECT_LT(stack_size, 20u * (1 << 20));
+#endif
+}
+
+#if defined(OS_APPLE)
+
+namespace {
+
+class RealtimeTestThread : public FunctionTestThread {
+ public:
+  explicit RealtimeTestThread(TimeDelta realtime_period)
+      : realtime_period_(realtime_period) {}
+  ~RealtimeTestThread() override = default;
+
+ private:
+  RealtimeTestThread(const RealtimeTestThread&) = delete;
+  RealtimeTestThread& operator=(const RealtimeTestThread&) = delete;
+
+  TimeDelta GetRealtimePeriod() final { return realtime_period_; }
+
+  // Verifies the realtime thead configuration.
+  void RunTest() override {
+    EXPECT_EQ(PlatformThread::GetCurrentThreadPriority(),
+              ThreadPriority::REALTIME_AUDIO);
+
+    mach_port_t mach_thread_id = pthread_mach_thread_np(
+        PlatformThread::CurrentHandle().platform_handle());
+
+    // |count| and |get_default| chosen impirically so that
+    // time_constraints_buffer[0] would store the last constraints that were
+    // applied.
+    const int kPolicyCount = 32;
+    thread_time_constraint_policy_data_t time_constraints_buffer[kPolicyCount];
+    mach_msg_type_number_t count = kPolicyCount;
+    boolean_t get_default = 0;
+
+    kern_return_t result = thread_policy_get(
+        mach_thread_id, THREAD_TIME_CONSTRAINT_POLICY,
+        reinterpret_cast<thread_policy_t>(time_constraints_buffer), &count,
+        &get_default);
+
+    EXPECT_EQ(result, KERN_SUCCESS);
+
+    const thread_time_constraint_policy_data_t& time_constraints =
+        time_constraints_buffer[0];
+
+    mach_timebase_info_data_t tb_info;
+    mach_timebase_info(&tb_info);
+
+    if (FeatureList::IsEnabled(kOptimizedRealtimeThreadingMac) &&
+#if defined(OS_MAC)
+        !mac::IsOS10_14() &&  // Should not be applied on 10.14.
+#endif
+        !realtime_period_.is_zero()) {
+      uint32_t abs_realtime_period = saturated_cast<uint32_t>(
+          realtime_period_.InNanoseconds() *
+          (static_cast<double>(tb_info.denom) / tb_info.numer));
+
+      EXPECT_EQ(time_constraints.period, abs_realtime_period);
+      EXPECT_EQ(
+          time_constraints.computation,
+          static_cast<uint32_t>(abs_realtime_period *
+                                kOptimizedRealtimeThreadingMacBusy.Get()));
+      EXPECT_EQ(
+          time_constraints.constraint,
+          static_cast<uint32_t>(abs_realtime_period *
+                                kOptimizedRealtimeThreadingMacBusyLimit.Get()));
+      EXPECT_EQ(time_constraints.preemptible,
+                kOptimizedRealtimeThreadingMacPreemptible.Get());
+    } else {
+      // Old-style empirical values.
+      const double kTimeQuantum = 2.9;
+      const double kAudioTimeNeeded = 0.75 * kTimeQuantum;
+      const double kMaxTimeAllowed = 0.85 * kTimeQuantum;
+
+      // Get the conversion factor from milliseconds to absolute time
+      // which is what the time-constraints returns.
+      double ms_to_abs_time = double(tb_info.denom) / tb_info.numer * 1000000;
+
+      EXPECT_EQ(time_constraints.period,
+                saturated_cast<uint32_t>(kTimeQuantum * ms_to_abs_time));
+      EXPECT_EQ(time_constraints.computation,
+                saturated_cast<uint32_t>(kAudioTimeNeeded * ms_to_abs_time));
+      EXPECT_EQ(time_constraints.constraint,
+                saturated_cast<uint32_t>(kMaxTimeAllowed * ms_to_abs_time));
+      EXPECT_FALSE(time_constraints.preemptible);
+    }
+  }
+
+  const TimeDelta realtime_period_;
+};
+
+class RealtimePlatformThreadTest
+    : public testing::TestWithParam<
+          std::tuple<bool, FieldTrialParams, TimeDelta>> {
+ protected:
+  void VerifyRealtimeConfig(TimeDelta period) {
+    RealtimeTestThread thread(period);
+    PlatformThreadHandle handle;
+
+    ASSERT_FALSE(thread.IsRunning());
+    ASSERT_TRUE(PlatformThread::CreateWithPriority(
+        0, &thread, &handle, ThreadPriority::REALTIME_AUDIO));
+    thread.WaitForTerminationReady();
+    ASSERT_TRUE(thread.IsRunning());
+
+    thread.MarkForTermination();
+    PlatformThread::Join(handle);
+    ASSERT_FALSE(thread.IsRunning());
+  }
+};
+
+TEST_P(RealtimePlatformThreadTest, RealtimeAudioConfigMac) {
+  test::ScopedFeatureList feature_list;
+  if (std::get<0>(GetParam())) {
+    feature_list.InitAndEnableFeatureWithParameters(
+        kOptimizedRealtimeThreadingMac, std::get<1>(GetParam()));
+  } else {
+    feature_list.InitAndDisableFeature(kOptimizedRealtimeThreadingMac);
+  }
+
+  PlatformThread::InitializeOptimizedRealtimeThreadingFeature();
+  VerifyRealtimeConfig(std::get<2>(GetParam()));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RealtimePlatformThreadTest,
+    RealtimePlatformThreadTest,
+    testing::Combine(
+        testing::Bool(),
+        testing::Values(
+            FieldTrialParams{
+                {kOptimizedRealtimeThreadingMacPreemptible.name, "true"}},
+            FieldTrialParams{
+                {kOptimizedRealtimeThreadingMacPreemptible.name, "false"}},
+            FieldTrialParams{
+                {kOptimizedRealtimeThreadingMacBusy.name, "0.5"},
+                {kOptimizedRealtimeThreadingMacBusyLimit.name, "0.75"}},
+            FieldTrialParams{
+                {kOptimizedRealtimeThreadingMacBusy.name, "0.7"},
+                {kOptimizedRealtimeThreadingMacBusyLimit.name, "0.7"}},
+            FieldTrialParams{
+                {kOptimizedRealtimeThreadingMacBusy.name, "1.0"},
+                {kOptimizedRealtimeThreadingMacBusyLimit.name, "1.0"}}),
+        testing::Values(TimeDelta(),
+                        TimeDelta::FromSeconds(256.0 / 48000),
+                        TimeDelta::FromMilliseconds(5),
+                        TimeDelta::FromMilliseconds(10),
+                        TimeDelta::FromSeconds(1024.0 / 44100),
+                        TimeDelta::FromSeconds(1024.0 / 16000))));
+
+}  // namespace
+
+#endif
 
 }  // namespace base

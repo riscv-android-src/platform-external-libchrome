@@ -24,6 +24,17 @@ BASE_EXPORT bool ContentUriExists(const FilePath& content_uri);
 // invalid.
 BASE_EXPORT std::string GetContentUriMimeType(const FilePath& content_uri);
 
+// Gets the display name from a content URI. Returns true if the name was found.
+BASE_EXPORT bool MaybeGetFileDisplayName(const FilePath& content_uri,
+                                         base::string16* file_display_name);
+
+// Deletes a content URI.
+BASE_EXPORT bool DeleteContentUri(const FilePath& content_uri);
+
+// Gets content URI's file path (eg: "content://org.chromium...") from normal
+// file path (eg: "/data/user/0/...").
+BASE_EXPORT FilePath GetContentUriFromFilePath(const FilePath& file_path);
+
 }  // namespace base
 
 #endif  // BASE_ANDROID_CONTENT_URI_UTILS_H_

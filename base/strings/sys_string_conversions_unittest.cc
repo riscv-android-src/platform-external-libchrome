@@ -75,8 +75,8 @@ TEST(SysStrings, SysUTF8ToWide) {
   EXPECT_EQ(expected_null, SysUTF8ToWide(utf8_null));
 }
 
-#if defined(OS_LINUX)  // Tests depend on setting a specific Linux locale.
-
+// Tests depend on setting a specific Linux locale.
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
 TEST(SysStrings, SysWideToNativeMB) {
 #if !defined(SYSTEM_NATIVE_UTF8)
   ScopedLocale locale("en_US.UTF-8");
@@ -169,28 +169,28 @@ TEST(SysStrings, SysNativeMBAndWide) {
 #if !defined(SYSTEM_NATIVE_UTF8)
   ScopedLocale locale("en_US.UTF-8");
 #endif
-  for (size_t i = 0; i < arraysize(kConvertRoundtripCases); ++i) {
-    std::wstring wide = kConvertRoundtripCases[i];
+  for (auto* i : kConvertRoundtripCases) {
+    std::wstring wide = i;
     std::wstring trip = SysNativeMBToWide(SysWideToNativeMB(wide));
     EXPECT_EQ(wide.size(), trip.size());
     EXPECT_EQ(wide, trip);
   }
 
   // We assume our test is running in UTF-8, so double check through ICU.
-  for (size_t i = 0; i < arraysize(kConvertRoundtripCases); ++i) {
-    std::wstring wide = kConvertRoundtripCases[i];
+  for (auto* i : kConvertRoundtripCases) {
+    std::wstring wide = i;
     std::wstring trip = SysNativeMBToWide(WideToUTF8(wide));
     EXPECT_EQ(wide.size(), trip.size());
     EXPECT_EQ(wide, trip);
   }
 
-  for (size_t i = 0; i < arraysize(kConvertRoundtripCases); ++i) {
-    std::wstring wide = kConvertRoundtripCases[i];
+  for (auto* i : kConvertRoundtripCases) {
+    std::wstring wide = i;
     std::wstring trip = UTF8ToWide(SysWideToNativeMB(wide));
     EXPECT_EQ(wide.size(), trip.size());
     EXPECT_EQ(wide, trip);
   }
 }
-#endif  // OS_LINUX
+#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
 
 }  // namespace base

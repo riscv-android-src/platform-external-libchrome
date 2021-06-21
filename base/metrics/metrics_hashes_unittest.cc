@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #include "base/format_macros.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -16,6 +16,7 @@ namespace base {
 
 // Make sure our ID hashes are the same as what we see on the server side.
 TEST(MetricsUtilTest, HashMetricName) {
+  // The cases must match those in //tools/metrics/ukm/codegen_test.py.
   static const struct {
     std::string input;
     std::string output;
@@ -25,7 +26,7 @@ TEST(MetricsUtilTest, HashMetricName) {
     {"NewTab", "0x290eb683f96572f1"},
   };
 
-  for (size_t i = 0; i < arraysize(cases); ++i) {
+  for (size_t i = 0; i < base::size(cases); ++i) {
     uint64_t hash = HashMetricName(cases[i].input);
     std::string hash_hex = base::StringPrintf("0x%016" PRIx64, hash);
     EXPECT_EQ(cases[i].output, hash_hex);

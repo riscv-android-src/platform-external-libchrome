@@ -22,17 +22,19 @@ class BASE_EXPORT LazyNow {
  public:
   explicit LazyNow(TimeTicks now);
   explicit LazyNow(const TickClock* tick_clock);
+  LazyNow(const LazyNow&) = delete;
+  LazyNow& operator=(const LazyNow&) = delete;
 
   LazyNow(LazyNow&& move_from) noexcept;
 
   // Result will not be updated on any subsesequent calls.
   TimeTicks Now();
 
+  bool has_value() const { return !!now_; }
+
  private:
   const TickClock* tick_clock_;  // Not owned.
   Optional<TimeTicks> now_;
-
-  DISALLOW_COPY_AND_ASSIGN(LazyNow);
 };
 
 }  // namespace sequence_manager

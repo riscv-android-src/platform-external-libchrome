@@ -8,10 +8,16 @@
 #include <stddef.h>
 #include <sys/param.h>
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include "base/bind.h"
+#include "base/file_descriptor_posix.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 
 // On some platforms these are not defined.
@@ -45,7 +51,7 @@ int FilePathWatcherKQueue::EventsForPath(FilePath path, EventVector* events) {
   path.GetComponents(&components);
 
   if (components.size() < 1) {
-    return -1;
+    return 0;
   }
 
   int last_existing_entry = 0;
@@ -78,9 +84,27 @@ int FilePathWatcherKQueue::EventsForPath(FilePath path, EventVector* events) {
   return last_existing_entry;
 }
 
+// static
+int FilePathWatcherKQueue::EventForItem(const FilePath& path,
+                                        EventVector* events) {
+  // Make sure that we are working with a clean slate.
+  DCHECK(events->empty());
+
+  events->resize(1);
+  auto& event = events->front();
+  EV_SET(&event, FileDescriptorForPath(path), EVFILT_VNODE,
+         (EV_ADD | EV_CLEAR | EV_RECEIPT),
+         (NOTE_DELETE | NOTE_WRITE | NOTE_ATTRIB | NOTE_RENAME | NOTE_REVOKE |
+          NOTE_EXTEND),
+         0, new EventData(path, /*subdir=*/FilePath::StringType()));
+
+  return event.ident != kNoFileDescriptor ? 1 : 0;
+}
+
 uintptr_t FilePathWatcherKQueue::FileDescriptorForPath(const FilePath& path) {
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   int fd = HANDLE_EINTR(open(path.value().c_str(), O_EVTONLY));
-  if (fd == -1)
+  if (fd == kInvalidFd)
     return kNoFileDescriptor;
   return fd;
 }
@@ -209,6 +233,7 @@ bool FilePathWatcherKQueue::UpdateWatches(bool* target_file_affected) {
     }
 
     EventVector updates(valid);
+    ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
     int count = HANDLE_EINTR(kevent(kqueue_, &events_[0], valid, &updates[0],
                                     valid, NULL));
     if (!AreKeventValuesValid(&updates[0], count)) {
@@ -232,13 +257,13 @@ bool FilePathWatcherKQueue::UpdateWatches(bool* target_file_affected) {
 }
 
 bool FilePathWatcherKQueue::Watch(const FilePath& path,
-                                  bool recursive,
+                                  Type type,
                                   const FilePathWatcher::Callback& callback) {
   DCHECK(target_.value().empty());  // Can only watch one path.
   DCHECK(!callback.is_null());
   DCHECK_EQ(kqueue_, -1);
   // Recursive watch is not supported using kqueue.
-  DCHECK(!recursive);
+  DCHECK_NE(type, Type::kRecursive);
 
   callback_ = callback;
   target_ = path;
@@ -251,11 +276,18 @@ bool FilePathWatcherKQueue::Watch(const FilePath& path,
     return false;
   }
 
-  int last_entry = EventsForPath(target_, &events_);
-  DCHECK_NE(last_entry, 0);
+  int last_entry = type == Type::kNonRecursive
+                       ? EventsForPath(target_, &events_)
+                       : EventForItem(target_, &events_);
+  if (last_entry < 1) {
+    // No notifications can possibly come in, so fail fast.
+    Cancel();
+    return false;
+  }
 
   EventVector responses(last_entry);
 
+  ScopedBlockingCall scoped_blocking_call(FROM_HERE, BlockingType::MAY_BLOCK);
   int count = HANDLE_EINTR(kevent(kqueue_, &events_[0], last_entry,
                                   &responses[0], last_entry, NULL));
   if (!AreKeventValuesValid(&responses[0], count)) {
@@ -271,8 +303,8 @@ bool FilePathWatcherKQueue::Watch(const FilePath& path,
   // callback cannot be invoked after |kqueue_watch_controller_| (which is a
   // member of |this|) has been deleted.
   kqueue_watch_controller_ = FileDescriptorWatcher::WatchReadable(
-      kqueue_,
-      Bind(&FilePathWatcherKQueue::OnKQueueReadable, Unretained(this)));
+      kqueue_, BindRepeating(&FilePathWatcherKQueue::OnKQueueReadable,
+                             Unretained(this)));
 
   return true;
 }
@@ -361,6 +393,7 @@ void FilePathWatcherKQueue::OnKQueueReadable() {
     if (!UpdateWatches(&send_notification)) {
       callback_.Run(target_, true /* error */);
       Cancel();
+      return;
     }
   }
 

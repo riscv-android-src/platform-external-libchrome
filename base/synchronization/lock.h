@@ -6,9 +6,10 @@
 #define BASE_SYNCHRONIZATION_LOCK_H_
 
 #include "base/base_export.h"
-#include "base/logging.h"
+#include "base/check_op.h"
 #include "base/macros.h"
 #include "base/synchronization/lock_impl.h"
+#include "base/thread_annotations.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 
@@ -17,23 +18,24 @@ namespace base {
 // A convenient wrapper for an OS specific critical section.  The only real
 // intelligence in this class is in debug mode for the support for the
 // AssertAcquired() method.
-class BASE_EXPORT Lock {
+class LOCKABLE BASE_EXPORT Lock {
  public:
 #if !DCHECK_IS_ON()
-   // Optimized wrapper implementation
+  // Optimized wrapper implementation
   Lock() : lock_() {}
   ~Lock() {}
-  void Acquire() { lock_.Lock(); }
-  void Release() { lock_.Unlock(); }
+
+  void Acquire() EXCLUSIVE_LOCK_FUNCTION() { lock_.Lock(); }
+  void Release() UNLOCK_FUNCTION() { lock_.Unlock(); }
 
   // If the lock is not held, take it and return true. If the lock is already
   // held by another thread, immediately return false. This must not be called
   // by a thread already holding the lock (what happens is undefined and an
   // assertion may fail).
-  bool Try() { return lock_.Try(); }
+  bool Try() EXCLUSIVE_TRYLOCK_FUNCTION(true) { return lock_.Try(); }
 
   // Null implementation if not debug.
-  void AssertAcquired() const {}
+  void AssertAcquired() const ASSERT_EXCLUSIVE_LOCK() {}
 #else
   Lock();
   ~Lock();
@@ -41,16 +43,16 @@ class BASE_EXPORT Lock {
   // NOTE: We do not permit recursive locks and will commonly fire a DCHECK() if
   // a thread attempts to acquire the lock a second time (while already holding
   // it).
-  void Acquire() {
+  void Acquire() EXCLUSIVE_LOCK_FUNCTION() {
     lock_.Lock();
     CheckUnheldAndMark();
   }
-  void Release() {
+  void Release() UNLOCK_FUNCTION() {
     CheckHeldAndUnmark();
     lock_.Unlock();
   }
 
-  bool Try() {
+  bool Try() EXCLUSIVE_TRYLOCK_FUNCTION(true) {
     bool rv = lock_.Try();
     if (rv) {
       CheckUnheldAndMark();
@@ -58,7 +60,7 @@ class BASE_EXPORT Lock {
     return rv;
   }
 
-  void AssertAcquired() const;
+  void AssertAcquired() const ASSERT_EXCLUSIVE_LOCK();
 #endif  // DCHECK_IS_ON()
 
   // Whether Lock mitigates priority inversion when used from different thread
@@ -105,46 +107,23 @@ class BASE_EXPORT Lock {
 };
 
 // A helper class that acquires the given Lock while the AutoLock is in scope.
-class AutoLock {
- public:
-  struct AlreadyAcquired {};
-
-  explicit AutoLock(Lock& lock) : lock_(lock) {
-    lock_.Acquire();
-  }
-
-  AutoLock(Lock& lock, const AlreadyAcquired&) : lock_(lock) {
-    lock_.AssertAcquired();
-  }
-
-  ~AutoLock() {
-    lock_.AssertAcquired();
-    lock_.Release();
-  }
-
- private:
-  Lock& lock_;
-  DISALLOW_COPY_AND_ASSIGN(AutoLock);
-};
+using AutoLock = internal::BasicAutoLock<Lock>;
 
 // AutoUnlock is a helper that will Release() the |lock| argument in the
 // constructor, and re-Acquire() it in the destructor.
-class AutoUnlock {
- public:
-  explicit AutoUnlock(Lock& lock) : lock_(lock) {
-    // We require our caller to have the lock.
-    lock_.AssertAcquired();
-    lock_.Release();
-  }
+using AutoUnlock = internal::BasicAutoUnlock<Lock>;
 
-  ~AutoUnlock() {
-    lock_.Acquire();
-  }
+// Like AutoLock but is a no-op when the provided Lock* is null. Inspired from
+// absl::MutexLockMaybe. Use this instead of base::Optional<base::AutoLock> to
+// get around -Wthread-safety-analysis warnings for conditional locking.
+using AutoLockMaybe = internal::BasicAutoLockMaybe<Lock>;
 
- private:
-  Lock& lock_;
-  DISALLOW_COPY_AND_ASSIGN(AutoUnlock);
-};
+// Like AutoLock but permits Release() of its mutex before destruction.
+// Release() may be called at most once. Inspired from
+// absl::ReleasableMutexLock. Use this instead of base::Optional<base::AutoLock>
+// to get around -Wthread-safety-analysis warnings for AutoLocks that are
+// explicitly released early (prefer proper scoping to this).
+using ReleasableAutoLock = internal::BasicReleasableAutoLock<Lock>;
 
 }  // namespace base
 

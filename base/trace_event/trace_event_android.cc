@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/bind.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
@@ -33,38 +34,34 @@ void WriteToATrace(int fd, const char* buffer, size_t size) {
       break;
     total_written += written;
   }
-  if (total_written < size) {
+  // Tracing might have been disabled before we were notified about it, which
+  // triggers EBADF. Since enabling and disabling atrace is racy, ignore the
+  // error in that case to avoid logging an error for every trace event.
+  if (total_written < size && errno != EBADF) {
     PLOG(WARNING) << "Failed to write buffer '" << std::string(buffer, size)
                   << "' to " << kATraceMarkerFile;
   }
 }
 
-void WriteEvent(
-    char phase,
-    const char* category_group,
-    const char* name,
-    unsigned long long id,
-    const char** arg_names,
-    const unsigned char* arg_types,
-    const TraceEvent::TraceValue* arg_values,
-    const std::unique_ptr<ConvertableToTraceFormat>* convertable_values,
-    unsigned int flags) {
+void WriteEvent(char phase,
+                const char* category_group,
+                const char* name,
+                unsigned long long id,
+                const TraceArguments& args,
+                unsigned int flags) {
   std::string out = StringPrintf("%c|%d|%s", phase, getpid(), name);
   if (flags & TRACE_EVENT_FLAG_HAS_ID)
     StringAppendF(&out, "-%" PRIx64, static_cast<uint64_t>(id));
   out += '|';
 
-  for (int i = 0; i < kTraceMaxNumArgs && arg_names[i];
-       ++i) {
+  const char* const* arg_names = args.names();
+  for (size_t i = 0; i < args.size() && arg_names[i]; ++i) {
     if (i)
       out += ';';
     out += arg_names[i];
     out += '=';
     std::string::size_type value_start = out.length();
-    if (arg_types[i] == TRACE_VALUE_TYPE_CONVERTABLE)
-      convertable_values[i]->AppendAsTraceFormat(&out);
-    else
-      TraceEvent::AppendValueAsJSON(arg_types[i], arg_values[i], &out);
+    args.values()[i].AppendAsJSON(args.types()[i], &out);
 
     // Remove the quotes which may confuse the atrace script.
     ReplaceSubstringsAfterOffset(&out, value_start, "\\\"", "'");
@@ -79,20 +76,6 @@ void WriteEvent(
   WriteToATrace(g_atrace_fd, out.c_str(), out.size());
 }
 
-void NoOpOutputCallback(WaitableEvent* complete_event,
-                        const scoped_refptr<RefCountedString>&,
-                        bool has_more_events) {
-  if (!has_more_events)
-    complete_event->Signal();
-}
-
-void EndChromeTracing(TraceLog* trace_log,
-                      WaitableEvent* complete_event) {
-  trace_log->SetDisabled();
-  // Delete the buffered trace events as they have been sent to atrace.
-  trace_log->Flush(Bind(&NoOpOutputCallback, complete_event));
-}
-
 }  // namespace
 
 // These functions support Android systrace.py when 'webview' category is
@@ -105,7 +88,7 @@ void EndChromeTracing(TraceLog* trace_log,
 //   StartATrace, StopATrace and SendToATrace, and perhaps send Java traces
 //   directly to atrace in trace_event_binding.cc.
 
-void TraceLog::StartATrace() {
+void TraceLog::StartATrace(const std::string& category_filter) {
   if (g_atrace_fd != -1)
     return;
 
@@ -114,28 +97,17 @@ void TraceLog::StartATrace() {
     PLOG(WARNING) << "Couldn't open " << kATraceMarkerFile;
     return;
   }
-  TraceConfig trace_config;
+  TraceConfig trace_config(category_filter);
   trace_config.SetTraceRecordMode(RECORD_CONTINUOUSLY);
   SetEnabled(trace_config, TraceLog::RECORDING_MODE);
 }
 
 void TraceLog::StopATrace() {
-  if (g_atrace_fd == -1)
-    return;
-
-  close(g_atrace_fd);
-  g_atrace_fd = -1;
-
-  // TraceLog::Flush() requires the current thread to have a message loop, but
-  // this thread called from Java may not have one, so flush in another thread.
-  Thread end_chrome_tracing_thread("end_chrome_tracing");
-  WaitableEvent complete_event(WaitableEvent::ResetPolicy::AUTOMATIC,
-                               WaitableEvent::InitialState::NOT_SIGNALED);
-  end_chrome_tracing_thread.Start();
-  end_chrome_tracing_thread.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&EndChromeTracing, Unretained(this),
-                            Unretained(&complete_event)));
-  complete_event.Wait();
+  if (g_atrace_fd != -1) {
+    close(g_atrace_fd);
+    g_atrace_fd = -1;
+  }
+  SetDisabled();
 }
 
 void TraceEvent::SendToATrace() {
@@ -147,43 +119,35 @@ void TraceEvent::SendToATrace() {
 
   switch (phase_) {
     case TRACE_EVENT_PHASE_BEGIN:
-      WriteEvent('B', category_group, name_, id_,
-                 arg_names_, arg_types_, arg_values_, convertable_values_,
-                 flags_);
+      WriteEvent('B', category_group, name_, id_, args_, flags_);
       break;
 
     case TRACE_EVENT_PHASE_COMPLETE:
-      WriteEvent(duration_.ToInternalValue() == -1 ? 'B' : 'E',
-                 category_group, name_, id_,
-                 arg_names_, arg_types_, arg_values_, convertable_values_,
-                 flags_);
+      WriteEvent(duration_.ToInternalValue() == -1 ? 'B' : 'E', category_group,
+                 name_, id_, args_, flags_);
       break;
 
     case TRACE_EVENT_PHASE_END:
       // Though a single 'E' is enough, here append pid, name and
       // category_group etc. So that unpaired events can be found easily.
-      WriteEvent('E', category_group, name_, id_,
-                 arg_names_, arg_types_, arg_values_, convertable_values_,
-                 flags_);
+      WriteEvent('E', category_group, name_, id_, args_, flags_);
       break;
 
     case TRACE_EVENT_PHASE_INSTANT:
       // Simulate an instance event with a pair of begin/end events.
-      WriteEvent('B', category_group, name_, id_,
-                 arg_names_, arg_types_, arg_values_, convertable_values_,
-                 flags_);
+      WriteEvent('B', category_group, name_, id_, args_, flags_);
       WriteToATrace(g_atrace_fd, "E", 1);
       break;
 
     case TRACE_EVENT_PHASE_COUNTER:
-      for (int i = 0; i < kTraceMaxNumArgs && arg_names_[i]; ++i) {
-        DCHECK(arg_types_[i] == TRACE_VALUE_TYPE_INT);
-        std::string out = base::StringPrintf(
-            "C|%d|%s-%s", getpid(), name_, arg_names_[i]);
+      for (size_t i = 0; i < arg_size() && arg_name(i); ++i) {
+        DCHECK(arg_type(i) == TRACE_VALUE_TYPE_INT);
+        std::string out =
+            base::StringPrintf("C|%d|%s-%s", getpid(), name_, arg_name(i));
         if (flags_ & TRACE_EVENT_FLAG_HAS_ID)
           StringAppendF(&out, "-%" PRIx64, static_cast<uint64_t>(id_));
-        StringAppendF(&out, "|%d|%s",
-                      static_cast<int>(arg_values_[i].as_int), category_group);
+        StringAppendF(&out, "|%d|%s", static_cast<int>(arg_value(i).as_int),
+                      category_group);
         WriteToATrace(g_atrace_fd, out.c_str(), out.size());
       }
       break;
@@ -210,6 +174,14 @@ void TraceLog::AddClockSyncMetadataEvent() {
       "trace_event_clock_sync: parent_ts=%f\n", now_in_seconds);
   WriteToATrace(atrace_fd, marker.c_str(), marker.size());
   close(atrace_fd);
+}
+
+void TraceLog::SetupATraceStartupTrace(const std::string& category_filter) {
+  atrace_startup_config_ = TraceConfig(category_filter);
+}
+
+Optional<TraceConfig> TraceLog::TakeATraceStartupConfig() {
+  return std::move(atrace_startup_config_);
 }
 
 }  // namespace trace_event

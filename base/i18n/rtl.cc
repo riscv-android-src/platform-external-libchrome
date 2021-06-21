@@ -13,7 +13,7 @@
 #include "base/files/file_path.h"
 #include "base/i18n/base_i18n_switches.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -71,15 +71,16 @@ base::i18n::TextDirection GetCharacterDirection(UChar32 character) {
   // Now that we have the character, we use ICU in order to query for the
   // appropriate Unicode BiDi character type.
   int32_t property = u_getIntPropertyValue(character, UCHAR_BIDI_CLASS);
-  if ((property == U_RIGHT_TO_LEFT) ||
-      (property == U_RIGHT_TO_LEFT_ARABIC) ||
-      (property == U_RIGHT_TO_LEFT_EMBEDDING) ||
-      (property == U_RIGHT_TO_LEFT_OVERRIDE)) {
-    return base::i18n::RIGHT_TO_LEFT;
-  } else if ((property == U_LEFT_TO_RIGHT) ||
-             (property == U_LEFT_TO_RIGHT_EMBEDDING) ||
-             (property == U_LEFT_TO_RIGHT_OVERRIDE)) {
-    return base::i18n::LEFT_TO_RIGHT;
+  switch (property) {
+    case U_RIGHT_TO_LEFT:
+    case U_RIGHT_TO_LEFT_ARABIC:
+    case U_RIGHT_TO_LEFT_EMBEDDING:
+    case U_RIGHT_TO_LEFT_OVERRIDE:
+      return base::i18n::RIGHT_TO_LEFT;
+    case U_LEFT_TO_RIGHT:
+    case U_LEFT_TO_RIGHT_EMBEDDING:
+    case U_LEFT_TO_RIGHT_OVERRIDE:
+      return base::i18n::LEFT_TO_RIGHT;
   }
   return base::i18n::UNKNOWN_DIRECTION;
 }
@@ -202,7 +203,7 @@ TextDirection GetTextDirectionForLocaleInStartUp(const char* locale_name) {
       SplitStringPiece(locale_name, "-_", KEEP_WHITESPACE, SPLIT_WANT_ALL);
   const StringPiece& language_code = locale_split[0];
   if (std::binary_search(kRTLLanguageCodes,
-                         kRTLLanguageCodes + arraysize(kRTLLanguageCodes),
+                         kRTLLanguageCodes + base::size(kRTLLanguageCodes),
                          language_code))
     return RIGHT_TO_LEFT;
   return LEFT_TO_RIGHT;
@@ -222,7 +223,7 @@ TextDirection GetTextDirectionForLocale(const char* locale_name) {
 }
 
 TextDirection GetFirstStrongCharacterDirection(const string16& text) {
-  const UChar* string = text.c_str();
+  const char16* string = text.c_str();
   size_t length = text.length();
   size_t position = 0;
   while (position < length) {
@@ -238,7 +239,7 @@ TextDirection GetFirstStrongCharacterDirection(const string16& text) {
 }
 
 TextDirection GetLastStrongCharacterDirection(const string16& text) {
-  const UChar* string = text.c_str();
+  const char16* string = text.c_str();
   size_t position = text.length();
   while (position > 0) {
     UChar32 character;
@@ -253,7 +254,7 @@ TextDirection GetLastStrongCharacterDirection(const string16& text) {
 }
 
 TextDirection GetStringDirection(const string16& text) {
-  const UChar* string = text.c_str();
+  const char16* string = text.c_str();
   size_t length = text.length();
   size_t position = 0;
 
@@ -403,7 +404,7 @@ void SanitizeUserSuppliedString(string16* text) {
 }
 
 bool StringContainsStrongRTLChars(const string16& text) {
-  const UChar* string = text.c_str();
+  const char16* string = text.c_str();
   size_t length = text.length();
   size_t position = 0;
   while (position < length) {
@@ -453,13 +454,13 @@ void WrapPathWithLTRFormatting(const FilePath& path,
   // string as a Left-To-Right string.
   // Inserting an LRE (Left-To-Right Embedding) mark as the first character.
   rtl_safe_path->push_back(kLeftToRightEmbeddingMark);
-#if defined(OS_MACOSX)
-    rtl_safe_path->append(UTF8ToUTF16(path.value()));
+#if defined(OS_APPLE)
+  rtl_safe_path->append(UTF8ToUTF16(path.value()));
 #elif defined(OS_WIN)
-    rtl_safe_path->append(path.value());
-#else  // defined(OS_POSIX) && !defined(OS_MACOSX)
-    std::wstring wide_path = base::SysNativeMBToWide(path.value());
-    rtl_safe_path->append(WideToUTF16(wide_path));
+  rtl_safe_path->append(AsString16(path.value()));
+#else  // defined(OS_POSIX) && !defined(OS_APPLE)
+  std::wstring wide_path = base::SysNativeMBToWide(path.value());
+  rtl_safe_path->append(WideToUTF16(wide_path));
 #endif
   // Inserting a PDF (Pop Directional Formatting) mark as the last character.
   rtl_safe_path->push_back(kPopDirectionalFormatting);

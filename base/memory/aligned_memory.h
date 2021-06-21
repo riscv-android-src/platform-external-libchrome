@@ -11,7 +11,9 @@
 #include <type_traits>
 
 #include "base/base_export.h"
-#include "base/compiler_specific.h"
+#include "base/bits.h"
+#include "base/check.h"
+#include "base/process/process_metrics.h"
 #include "build/build_config.h"
 
 #if defined(COMPILER_MSVC)
@@ -34,7 +36,9 @@
 
 namespace base {
 
-// This can be replaced with std::aligned_malloc when we have C++17.
+// This can be replaced with std::aligned_alloc when we have C++17.
+// Caveat: std::aligned_alloc requires the size parameter be an integral
+// multiple of alignment.
 BASE_EXPORT void* AlignedAlloc(size_t size, size_t alignment);
 
 inline void AlignedFree(void* ptr) {
@@ -52,6 +56,35 @@ struct AlignedFreeDeleter {
     AlignedFree(ptr);
   }
 };
+
+#ifdef __has_builtin
+#define SUPPORTS_BUILTIN_IS_ALIGNED (__has_builtin(__builtin_is_aligned))
+#else
+#define SUPPORTS_BUILTIN_IS_ALIGNED 0
+#endif
+
+inline bool IsAligned(uintptr_t val, size_t alignment) {
+  // If the compiler supports builtin alignment checks prefer them.
+#if SUPPORTS_BUILTIN_IS_ALIGNED
+  return __builtin_is_aligned(val, alignment);
+#else
+  DCHECK(bits::IsPowerOfTwo(alignment)) << alignment << " is not a power of 2";
+  return (val & (alignment - 1)) == 0;
+#endif
+}
+
+#undef SUPPORTS_BUILTIN_IS_ALIGNED
+
+inline bool IsAligned(const void* val, size_t alignment) {
+  return IsAligned(reinterpret_cast<uintptr_t>(val), alignment);
+}
+
+template <typename Type>
+inline bool IsPageAligned(Type val) {
+  static_assert(std::is_integral<Type>::value || std::is_pointer<Type>::value,
+                "Integral or pointer type required");
+  return IsAligned(val, GetPageSize());
+}
 
 }  // namespace base
 
