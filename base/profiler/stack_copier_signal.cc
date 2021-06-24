@@ -9,6 +9,7 @@
 #include <sys/ucontext.h>
 #include <syscall.h>
 
+#include <cstring>
 #include <atomic>
 
 #include "base/notreached.h"
