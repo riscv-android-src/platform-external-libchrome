@@ -198,7 +198,7 @@ NumPartitionPagesPerSuperPage() {
 // platforms, as Chrome's requirement is C++14 as of 2020.
 #if defined(__STDCPP_DEFAULT_NEW_ALIGNMENT__)
 static constexpr size_t kAlignment =
-    std::max(alignof(std::max_align_t), __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+    std::max((size_t) alignof(std::max_align_t), (size_t) __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 #else
 static constexpr size_t kAlignment = alignof(std::max_align_t);
 #endif
