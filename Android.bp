@@ -815,19 +815,22 @@ libchromeAndroidSrc = [
 cc_library {
     name: "libchrome",
     host_supported: true,
+    ramdisk_available: true,
     recovery_available: true,
     vendor_available: true,
     defaults: ["libchrome-defaults"],
     srcs: libchromeCommonSrc,
 
     export_shared_lib_headers: ["libbase"],
-    export_static_lib_headers: ["libgtest_prod"],
+    export_header_lib_headers: ["libgtest_prod_headers"],
     shared_libs: [
         "libbase",
         "libevent",
     ],
+    header_libs: [
+        "libgtest_prod_headers",
+    ],
     static_libs: [
-        "libgtest_prod",
         "libmodpb64",
     ],
     generated_headers: [
