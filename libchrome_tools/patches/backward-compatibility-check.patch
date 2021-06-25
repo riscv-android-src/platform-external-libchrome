@@ -40,22 +40,4 @@ index d4f9a914f9e7..b2a0d1b589c9 100644
 -
  #include <limits.h>
  #include <stdint.h>
- 
-diff --git a/base/logging.h b/base/logging.h
-index 343313beb8ee..04473618911b 100644
---- a/base/logging.h
-+++ b/base/logging.h
-@@ -14,8 +14,10 @@
- 
- #include "base/base_export.h"
- #include "base/callback_forward.h"
-+#include "base/check.h"
-+#include "base/check_op.h"
- #include "base/compiler_specific.h"
- #include "base/dcheck_is_on.h"
- #include "base/scoped_clear_last_error.h"
- #include "base/strings/string_piece_forward.h"
- #include "build/chromeos_buildflags.h"
--- 
-2.30.0.617.g56c4b15f3c-goog
 
