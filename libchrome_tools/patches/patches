@@ -32,3 +32,7 @@ disable-Channel-SupportsChannelUpgrade.patch
 
 # Forward compatibility for 2-param base::{AppendToFile,WriteFileDescriptor} variants
 forward-compatibility-base-file-util.patch
+
+# Backport glibc 2.33 mallinfo deprecation fix
+# Remove after r873183 uprev.
+libchrome-base-process-Use-mallinfo2-with-glibc-2.33-and-up.patch
