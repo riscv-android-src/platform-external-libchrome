@@ -40,3 +40,7 @@ libchrome-base-process-Use-mallinfo2-with-glibc-2.33-and-up.patch
 # Modify mojom_parser.py to search for external Mojo modules.
 # Remove after r900163
 mojom-parser-external-modules.patch
+
+# For migration to absl::optional; cherry-pick of crrev.com/c/2892208
+# Remove after r882460 uprev
+Alias-base-Optional-to-absl-optional.patch
