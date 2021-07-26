@@ -29,7 +29,7 @@ config("libchrome_config") {
     "MOJO_CORE_LEGACY_PROTOCOL",
   ]
   if (use.asan) {
-    defines += [ "LEAK_SANITIZER" ]
+    defines += [ "LEAK_SANITIZER", "DISABLE_ALLOCATOR_SANITIZER" ]
   }
 
   include_dirs = [ ".", "${sysroot}/usr/include/perfetto" ]
@@ -599,7 +599,7 @@ libchrome_exported_cflags = [
 ]
 
 if (use.asan) {
-  libchrome_exported_cflags += [ "-DLEAK_SANITIZER" ]
+  libchrome_exported_cflags += [ "-DLEAK_SANITIZER", "-DDISABLE_ALLOCATOR_SANITIZER" ]
 }
 
 generate_pkg_config("libchrome") {
