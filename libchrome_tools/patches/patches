@@ -1,6 +1,8 @@
 # This file will be used by emerge in libchrome-XXXX.ebuild to determine the
 # order of applying patches.
 
+# ========= LONG TERM PATCHES =========================
+
 # Remove glib dependency.
 # TODO(hidehiko): Fix the config in AOSP libchrome.
 libchrome-Remove-glib-dependency.patch
@@ -17,14 +19,34 @@ absl-thread-annotation-conflict.patch
 # We don't need.
 revert-crbug-1001171.patch
 
-# Backward compatibility patches for header change.
-# CHECK* not implitly included by base/logging.h
-backward-compatibility-check.patch
+# ==================== CHERRY PICKS ===========================
+# Remove after r866231
+Share-most-ReceiverSet-state-and-logic.patch
+
+# Backport glibc 2.33 mallinfo deprecation fix
+# Remove after r873183 uprev.
+libchrome-base-process-Use-mallinfo2-with-glibc-2.33-and-up.patch
 
 # For base/notreached.h implicitly included via trace_event.h use in
 # ipc/ipc_message_utils.cc.
 # Remove after r875277 uprev.
 add-include-header-base-notreached.h.patch
+
+# For migration to absl::optional; cherry-pick of crrev.com/c/2892208
+# Remove after r882460 uprev
+Alias-base-Optional-to-absl-optional.patch
+
+# Modify mojom_parser.py to search for external Mojo modules.
+# Remove after r900163
+mojom-parser-external-modules.patch
+
+# Remove after r912107
+mojo-Add-ReceiverSetBase-RemoveWithReason.patch
+
+# ==================== BACKWARD / FORWARD COMPATIBILITY PATCHES FOR UPREVS ===
+# Backward compatibility patches for header change.
+# CHECK* not implitly included by base/logging.h
+backward-compatibility-check.patch
 
 # Backward compatibility for seccomp issues with memfd_create
 # TODO(b/189403036): enable when thorough testing is done after libchrome uprev
@@ -32,15 +54,3 @@ disable-Channel-SupportsChannelUpgrade.patch
 
 # Forward compatibility for 2-param base::{AppendToFile,WriteFileDescriptor} variants
 forward-compatibility-base-file-util.patch
-
-# Backport glibc 2.33 mallinfo deprecation fix
-# Remove after r873183 uprev.
-libchrome-base-process-Use-mallinfo2-with-glibc-2.33-and-up.patch
-
-# Modify mojom_parser.py to search for external Mojo modules.
-# Remove after r900163
-mojom-parser-external-modules.patch
-
-# For migration to absl::optional; cherry-pick of crrev.com/c/2892208
-# Remove after r882460 uprev
-Alias-base-Optional-to-absl-optional.patch
